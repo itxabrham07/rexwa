@@ -1,6 +1,8 @@
-const { default: makeWASocket, DisconnectReason, fetchLatestBaileysVersion, getAggregateVotesInPollMessage, isJidNewsletter, delay, proto } = require('@whiskeysockets/baileys');
+const { default: makeWASocket, useMultiFileAuthState, DisconnectReason, fetchLatestBaileysVersion, makeCacheableSignalKeyStore, getAggregateVotesInPollMessage, isJidNewsletter, delay, proto } = require('@whiskeysockets/baileys');
 const { Boom } = require('@hapi/boom');
 const qrcode = require('qrcode-terminal');
+const fs = require('fs-extra');
+const path = require('path');
 const NodeCache = require('node-cache');
 
 const config = require('../config');
@@ -8,7 +10,7 @@ const logger = require('./logger');
 const MessageHandler = require('./message-handler');
 const { connectDb } = require('../utils/db');
 const ModuleLoader = require('./module-loader');
-const { useMongoAuthState, makeCacheableSignalKeyStore } = require('../utils/mongoAuthState');
+const { useMongoAuthState } = require('../utils/mongoAuthState');
 const { makeInMemoryStore } = require('./store');
 const msgRetryCounterCache = new NodeCache();
 
@@ -16,13 +18,15 @@ class HyperWaBot {
     constructor() {
         this.sock = null;
         this.store = makeInMemoryStore({ logger: logger.child({ module: 'store' }) });
+        this.store.loadFromFile();
+        this.authPath = './auth_info';
         this.messageHandler = new MessageHandler(this);
         this.telegramBridge = null;
         this.isShuttingDown = false;
         this.db = null;
         this.moduleLoader = new ModuleLoader(this);
         this.qrCodeSent = false;
-        this.useMongoAuth = config.get('auth.useMongoAuth', true); // Default to MongoDB auth
+        this.useMongoAuth = config.get('auth.useMongoAuth', false);
         this.messageStore = new Map();
 
         // Reconnection backoff
@@ -75,6 +79,7 @@ class HyperWaBot {
             }
         }
 
+        await this.store.loadFromFile();
         await this.moduleLoader.loadModules();
         await this.startSock();
 
@@ -82,7 +87,7 @@ class HyperWaBot {
     }
 
     async startSock() {
-        let state, saveCreds, clearSession;
+        let state, saveCreds;
 
         // Clean up existing socket
         if (this.sock) {
@@ -92,43 +97,36 @@ class HyperWaBot {
             this.sock = null;
         }
 
-        // Use pure MongoDB auth (no file system dependencies)
-        logger.info('🔧 Using pure MongoDB authentication state...');
-        try {
-            const authResult = await useMongoAuthState();
-            state = authResult.state;
-            saveCreds = authResult.saveCreds;
-            clearSession = authResult.clearSession;
-            
-            // Validate state
-            if (!state || !state.creds) {
-                throw new Error('Invalid auth state returned from MongoDB');
+        // Choose auth method
+        if (this.useMongoAuth) {
+            logger.info('🔧 Using MongoDB auth state...');
+            try {
+                ({ state, saveCreds } = await useMongoAuthState());
+            } catch (error) {
+                logger.error('❌ Failed to initialize MongoDB auth state:', error);
+                logger.info('🔄 Falling back to file-based auth...');
+                ({ state, saveCreds } = await useMultiFileAuthState(this.authPath));
             }
-            
-            logger.info('✅ MongoDB auth state initialized successfully');
-            logger.info(`📊 Auth state: ${Object.keys(state.keys).length} keys loaded`);
-        } catch (error) {
-            logger.error('❌ Failed to initialize MongoDB auth state:', error.message);
-            logger.error('📍 Error stack:', error.stack);
-            
-            // Don't exit, let it retry
-            logger.info('🔄 Retrying in 10 seconds...');
-            setTimeout(() => this.startSock(), 10000);
-            return;
+        } else {
+            logger.info('🔧 Using file-based auth state...');
+            ({ state, saveCreds } = await useMultiFileAuthState(this.authPath));
+        }
+
+        // Wait for files to settle (critical for keys/)
+        await new Promise(resolve => setTimeout(resolve, 1000));
+
+        // Verify keys directory exists
+        const keysDir = path.join(this.authPath, 'keys');
+        if (await fs.pathExists(keysDir)) {
+            const keyFiles = (await fs.readdir(keysDir)).length;
+            logger.debug(`🔑 Session keys loaded: ${keyFiles} sessions`);
+        } else {
+            logger.warn('⚠️ keys/ directory missing! Session will be unstable until new messages are received.');
         }
 
         // Fetch latest WA version
-        let version, isLatest;
-        try {
-            const versionResult = await fetchLatestBaileysVersion();
-            version = versionResult.version;
-            isLatest = versionResult.isLatest;
-            logger.info(`📱 Using WA v${version.join('.')}, isLatest: ${isLatest}`);
-        } catch (error) {
-            logger.warn('⚠️ Failed to fetch latest version, using defaults:', error.message);
-            version = [2, 2413, 1];
-            isLatest = false;
-        }
+        const { version, isLatest } = await fetchLatestBaileysVersion();
+        logger.info(`📱 Using WA v${version.join('.')}, isLatest: ${isLatest}`);
 
         try {
             this.sock = makeWASocket({
@@ -179,11 +177,15 @@ class HyperWaBot {
                             }
                         } else {
                             logger.error('❌ Connection closed permanently. Clearing session...');
-                            try {
-                                await clearSession();
-                                logger.info('🗑️ MongoDB auth session cleared successfully');
-                            } catch (error) {
-                                logger.error('❌ Failed to clear MongoDB auth session:', error);
+                            if (this.useMongoAuth) {
+                                try {
+                                    const db = await connectDb();
+                                    const coll = db.collection("auth");
+                                    await coll.deleteOne({ _id: "session" });
+                                    logger.info('🗑️ MongoDB auth session cleared');
+                                } catch (error) {
+                                    logger.error('❌ Failed to clear MongoDB auth session:', error);
+                                }
                             }
                             process.exit(1);
                         }
@@ -201,11 +203,11 @@ class HyperWaBot {
                 }
 
                 if (events['labels.association']) {
-                    logger.info('🏷️ Label association update:', events['labels.association']);
+                    logger.info('📋 Label association update:', events['labels.association']);
                 }
 
                 if (events['labels.edit']) {
-                    logger.info('🏷️ Label edit update:', events['labels.edit']);
+                    logger.info('📝 Label edit update:', events['labels.edit']);
                 }
 
                 if (events.call) {
@@ -337,6 +339,7 @@ class HyperWaBot {
     async onConnectionOpen() {
         logger.info(`✅ Connected to WhatsApp! User: ${this.sock.user?.id || 'Unknown'}`);
 
+
         if (!config.get('bot.owner') && this.sock.user) {
             config.set('bot.owner', this.sock.user.id);
             logger.info(`👑 Owner set to: ${this.sock.user.id}`);
@@ -369,7 +372,6 @@ class HyperWaBot {
                               `🔥 *HyperWa Features Active:*\n` +
                               `• 🤖 Telegram Bridge: ${config.get('telegram.enabled') ? '✅' : '❌'}\n` +
                               `• 🔄 Auto Replies: ${this.doReplies ? '✅' : '❌'}\n` +
-                              `• 💾 Auth Method: MongoDB (Pure)\n` +
                               `Type *${config.get('bot.prefix')}help* for available commands!`;
 
         try {
@@ -416,6 +418,7 @@ class HyperWaBot {
         if (this.sock) {
             await this.sock.end();
         }
+
 
         logger.info('✅ HyperWa Userbot shutdown complete');
     }
