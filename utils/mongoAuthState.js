@@ -1,6 +1,6 @@
 const { proto } = require('@whiskeysockets/baileys');
 const { connectDb } = require('./db');
-const logger = require('./logger');
+const logger = require('../Core/logger');
 
 async function useMongoAuthState() {
     try {
