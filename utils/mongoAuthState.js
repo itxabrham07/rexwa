@@ -1,17 +1,56 @@
-const { AuthenticationCreds, SignalDataTypeMap } = require("@whiskeysockets/baileys");
+const { proto } = require("@whiskeysockets/baileys");
 const { connectDb } = require("./db");
+
+// Default authentication credentials structure
+function initAuthCreds() {
+    return {
+        noiseKey: null,
+        signedIdentityKey: null,
+        signedPreKey: null,
+        registrationId: 0,
+        advSecretKey: null,
+        processedHistoryMessages: [],
+        nextPreKeyId: 0,
+        firstUnuploadedPreKeyId: 0,
+        accountSettings: {},
+        accountSyncCounter: 0,
+        platform: 'web',
+        phoneId: null,
+        deviceId: null,
+        identityId: null,
+        registered: false,
+        backupToken: null,
+        registration: {}
+    };
+}
 
 /**
  * Pure MongoDB Authentication State
  * Stores all session data directly in MongoDB without any file system dependencies
  */
 async function useMongoAuthState() {
-    const db = await connectDb();
+    let db;
+    
+    try {
+        db = await connectDb();
+        console.log("✅ Connected to MongoDB for auth state");
+    } catch (error) {
+        console.error("❌ Failed to connect to MongoDB:", error.message);
+        throw error;
+    }
     
     // Collections for different types of auth data
-    const credsCollection = db.collection("auth_creds");
-    const keysCollection = db.collection("auth_keys");
-    const sessionsCollection = db.collection("auth_sessions");
+    let credsCollection, keysCollection, sessionsCollection;
+    
+    try {
+        credsCollection = db.collection("auth_creds");
+        keysCollection = db.collection("auth_keys");
+        sessionsCollection = db.collection("auth_sessions");
+        console.log("✅ MongoDB collections initialized");
+    } catch (error) {
+        console.error("❌ Failed to initialize collections:", error.message);
+        throw error;
+    }
 
     console.log("🔧 Using pure MongoDB auth state...");
 
@@ -24,10 +63,10 @@ async function useMongoAuthState() {
                 return credsDoc.creds;
             }
             console.log("ℹ️ No credentials found in MongoDB - new session required");
-            return undefined;
+            return initAuthCreds(); // Return default creds instead of undefined
         } catch (error) {
-            console.error("❌ Failed to load credentials from MongoDB:", error);
-            return undefined;
+            console.error("❌ Failed to load credentials from MongoDB:", error.message);
+            return initAuthCreds(); // Return default creds on error
         }
     }
 
@@ -46,7 +85,7 @@ async function useMongoAuthState() {
             );
             console.log("💾 Credentials saved to MongoDB");
         } catch (error) {
-            console.error("❌ Failed to save credentials to MongoDB:", error);
+            console.error("❌ Failed to save credentials to MongoDB:", error.message);
         }
     }
 
@@ -63,7 +102,7 @@ async function useMongoAuthState() {
             console.log(`🔑 Loaded ${Object.keys(keys).length} keys from MongoDB`);
             return keys;
         } catch (error) {
-            console.error("❌ Failed to load keys from MongoDB:", error);
+            console.error("❌ Failed to load keys from MongoDB:", error.message);
             return {};
         }
     }
@@ -81,9 +120,9 @@ async function useMongoAuthState() {
                 },
                 { upsert: true }
             );
-            console.log(`💾 Key ${keyId} saved to MongoDB`);
+            // Removed excessive logging for individual keys
         } catch (error) {
-            console.error(`❌ Failed to save key ${keyId} to MongoDB:`, error);
+            console.error(`❌ Failed to save key ${keyId} to MongoDB:`, error.message);
         }
     }
 
@@ -93,7 +132,7 @@ async function useMongoAuthState() {
             await keysCollection.deleteOne({ _id: keyId });
             console.log(`🗑️ Key ${keyId} removed from MongoDB`);
         } catch (error) {
-            console.error(`❌ Failed to remove key ${keyId} from MongoDB:`, error);
+            console.error(`❌ Failed to remove key ${keyId} from MongoDB:`, error.message);
         }
     }
 
@@ -103,7 +142,7 @@ async function useMongoAuthState() {
 
     // Create state object
     const state = {
-        creds: creds || AuthenticationCreds(),
+        creds: creds,
         keys: keys
     };
 
@@ -171,7 +210,7 @@ async function useMongoAuthState() {
             ]);
             console.log("✅ MongoDB auth session cleared");
         } catch (error) {
-            console.error("❌ Failed to clear MongoDB auth session:", error);
+            console.error("❌ Failed to clear MongoDB auth session:", error.message);
         }
     };
 
@@ -190,7 +229,7 @@ async function useMongoAuthState() {
             );
             console.log("💾 Session data saved to MongoDB");
         } catch (error) {
-            console.error("❌ Failed to save session to MongoDB:", error);
+            console.error("❌ Failed to save session to MongoDB:", error.message);
         }
     };
 
@@ -203,10 +242,12 @@ async function useMongoAuthState() {
             }
             return null;
         } catch (error) {
-            console.error("❌ Failed to load session from MongoDB:", error);
+            console.error("❌ Failed to load session from MongoDB:", error.message);
             return null;
         }
     };
+
+    console.log("✅ MongoDB auth state initialized successfully");
 
     return {
         state,
