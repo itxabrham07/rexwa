@@ -115,15 +115,6 @@ class HyperWaBot {
         // Wait for files to settle (critical for keys/)
         await new Promise(resolve => setTimeout(resolve, 1000));
 
-        // Verify keys directory exists
-        const keysDir = path.join(this.authPath, 'keys');
-        if (await fs.pathExists(keysDir)) {
-            const keyFiles = (await fs.readdir(keysDir)).length;
-            logger.debug(`🔑 Session keys loaded: ${keyFiles} sessions`);
-        } else {
-            logger.warn('⚠️ keys/ directory missing! Session will be unstable until new messages are received.');
-        }
-
         // Fetch latest WA version
         const { version, isLatest } = await fetchLatestBaileysVersion();
         logger.info(`📱 Using WA v${version.join('.')}, isLatest: ${isLatest}`);
