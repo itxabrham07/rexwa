@@ -29,9 +29,6 @@ class HyperWaBot {
         this.useMongoAuth = config.get('auth.useMongoAuth', false);
         this.messageStore = new Map();
 
-        // Reconnection backoff
-        this.reconnectInterval = 1000; // Start with 1s
-        this.maxReconnectInterval = 30000; // Max 30s
 
         // Memory cleanup: keep messages < 10 mins old
         setInterval(() => {
@@ -159,12 +156,11 @@ class HyperWaBot {
                     }
 
                     if (connection === 'close') {
-                        const statusCode = (lastDisconnect?.error)?.output?.statusCode;
-                        if (statusCode !== DisconnectReason.loggedOut) {
+                        // reconnect if not logged out
+                        if ((lastDisconnect?.error)?.output?.statusCode !== DisconnectReason.loggedOut) {
                             if (!this.isShuttingDown) {
-                                logger.warn(`🔄 Connection closed. Reconnecting in ${this.reconnectInterval}ms...`);
-                                setTimeout(() => this.startSock(), this.reconnectInterval);
-                                this.reconnectInterval = Math.min(this.reconnectInterval * 2, this.maxReconnectInterval);
+                                logger.warn('🔄 Connection closed, reconnecting...');
+                                this.startSock();
                             }
                         } else {
                             logger.error('❌ Connection closed permanently. Clearing session...');
@@ -181,13 +177,12 @@ class HyperWaBot {
                             process.exit(1);
                         }
                     } else if (connection === 'open') {
-                        // ✅ Reset reconnect interval
-                        this.reconnectInterval = 1000;
                         await this.onConnectionOpen();
                     }
 
                     logger.info('Connection update:', update);
                 }
+
 
                 if (events['creds.update']) {
                     await saveCreds();
