@@ -22,7 +22,7 @@ class Config {
 
             // Feature toggles and options
             features: {
-                mode: 'public',                   // 'public' or 'private'
+                mode: 'private',                   // 'public' or 'private'
                 customModules: true,              // Enable custom modules
                 rateLimiting: true,                // Disable rate limiting for better performance
                 autoReply: false,                  // Auto reply to messages
