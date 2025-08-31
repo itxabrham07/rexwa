@@ -41,7 +41,7 @@ class GimgModule {
 
         try {
             const response = await this.ai.models.generateContent({
-                model: "gemini-2.0-flash-image-preview-generation",
+                model: "gemini-2.0-flash-preview-image-generation",
                 contents: [{ text: prompt }],
             });
 
