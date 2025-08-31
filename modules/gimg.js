@@ -1,8 +1,7 @@
 const fs = require('fs');
 const path = require('path');
 const { spawn } = require('child_process');
-const { genai } = require('@google/generative-ai');
-const { types } = require('@google/generative-ai');
+const { GoogleGenerativeAI } = require('@google/generative-ai');
 
 class GeminiModule {
     constructor(bot) {
@@ -14,6 +13,12 @@ class GeminiModule {
             author: 'Bot Developer',
             category: 'ai'
         };
+        
+        // Add your Gemini API key here
+        this.GEMINI_API_KEY = "YOUR_GEMINI_API_KEY_HERE";
+        this.genAI = null;
+        this.model = null;
+        
         this.commands = [
             {
                 name: 'gimg',
@@ -27,9 +32,17 @@ class GeminiModule {
                 execute: this.gimgCommand.bind(this)
             }
         ];
+    }
+
+    async init() {
+        if (!this.GEMINI_API_KEY || this.GEMINI_API_KEY === "YOUR_GEMINI_API_KEY_HERE") {
+            console.error('❌ Gemini API key is missing');
+            throw new Error('Gemini API key not configured');
+        }
         
-        // Add your Gemini API key here
-        this.GEMINI_API_KEY = "AIzaSyAipn0J_8OzXfZWLt2l_Pn0jb28lkzAtZ0";
+        this.genAI = new GoogleGenerativeAI(this.GEMINI_API_KEY);
+        this.model = this.genAI.getGenerativeModel({ model: "gemini-2.0-flash-exp" });
+        console.log('Gemini AI module initialized');
     }
 
     async runSubprocess(cmd, timeout = null) {
@@ -64,8 +77,8 @@ class GeminiModule {
     }
 
     async gimgCommand(msg, params, context) {
-        if (!this.GEMINI_API_KEY || this.GEMINI_API_KEY === "YOUR_GEMINI_API_KEY_HERE") {
-            return "❌ *Configuration Error*\n\nPlease add your Gemini API key to the module code.";
+        if (!this.model) {
+            return "❌ *Configuration Error*\n\nGemini AI is not properly initialized. Please check the API key.";
         }
         
         // Get prompt and check for replied content
@@ -105,14 +118,8 @@ class GeminiModule {
         
         const generatedFiles = [];
         try {
-            const client = new genai.Client({
-                apiKey: this.GEMINI_API_KEY
-            });
-            
-            const model = "gemini-2.5-flash-image-preview";
-            
             // Prepare content parts
-            const contentParts = [types.Part.fromText(prompt)];
+            const contentParts = [{ text: prompt }];
             
             // Add image data if replying to an image
             if (imageData) {
@@ -126,103 +133,34 @@ class GeminiModule {
                     mimeType = "image/jpeg";
                 }
                 
-                contentParts.push(
-                    types.Part.fromBytes({
-                        data: imageData,
+                contentParts.push({
+                    inlineData: {
+                        data: imageData.toString('base64'),
                         mimeType: mimeType
-                    })
-                );
+                    }
+                });
             }
             
-            const contents = [
-                types.Content({
-                    role: "user",
-                    parts: contentParts,
-                }),
-            ];
-            
-            const generateContentConfig = types.GenerateContentConfig({
-                responseModalities: [
-                    "IMAGE",
-                    "TEXT",
-                ],
-            });
-            
-            let textResponse = "";
-            let fileIndex = 0;
-            
-            for await (const chunk of client.models.generateContentStream({
-                model: model,
-                contents: contents,
-                config: generateContentConfig,
-            })) {
-                if (
-                    !chunk.candidates ||
-                    !chunk.candidates[0].content ||
-                    !chunk.candidates[0].content.parts
-                ) {
-                    continue;
-                }
-                
-                // Handle image data
-                const part = chunk.candidates[0].content.parts[0];
-                if (part.inlineData && part.inlineData.data) {
-                    const inlineData = part.inlineData;
-                    const dataBuffer = inlineData.data;
-                    const fileExtension = this.getFileExtension(inlineData.mimeType) || ".png";
-                    
-                    // Create temporary file
-                    const tempPath = path.join(os.tmpdir(), `gemini_${Date.now()}_${fileIndex}${fileExtension}`);
-                    fs.writeFileSync(tempPath, dataBuffer);
-                    generatedFiles.push(tempPath);
-                    fileIndex++;
-                }
-                
-                // Handle text data
-                if (chunk.text) {
-                    textResponse += chunk.text;
-                }
-            }
+            const result = await this.model.generateContent(contentParts);
+            const response = await result.response;
+            const textResponse = response.text();
             
             let responseText = "";
             
             // Send text response if available
             if (textResponse) {
-                textResponse = textResponse.trim();
+                const cleanText = textResponse.trim();
                 // Split long messages to avoid Telegram limits
                 const maxLength = 4000;
-                if (textResponse.length > maxLength) {
-                    for (let i = 0; i < textResponse.length; i += maxLength) {
-                        const chunk = textResponse.substring(i, i + maxLength);
+                if (cleanText.length > maxLength) {
+                    for (let i = 0; i < cleanText.length; i += maxLength) {
+                        const chunk = cleanText.substring(i, i + maxLength);
                         await this.bot.sendMessage(msg.chat.id, `🤖 **Gemini Response** (Part ${Math.floor(i/maxLength) + 1}):\n\n${chunk}`);
                     }
                 } else {
-                    await this.bot.sendMessage(msg.chat.id, `🤖 **Gemini Response:**\n\n${textResponse}`);
+                    await this.bot.sendMessage(msg.chat.id, `🤖 **Gemini Response:**\n\n${cleanText}`);
                 }
-            }
-            
-            // Send generated images if any
-            for (const filePath of generatedFiles) {
-                if (fs.existsSync(filePath) && fs.statSync(filePath).size > 0) {
-                    try {
-                        await this.bot.sendPhoto(msg.chat.id, filePath, { caption: "🎨 Generated by Gemini AI" });
-                    } catch (error) {
-                        try {
-                            await this.bot.sendDocument(msg.chat.id, filePath, { caption: "🎨 Generated by Gemini AI" });
-                        } catch (docError) {
-                            // Skip this file if both photo and document fail
-                        }
-                    }
-                }
-            }
-            
-            // Success message
-            if (textResponse && generatedFiles.length > 0) {
-                responseText = "✅ *Generation Complete*\n\nGenerated text and images sent!";
-            } else if (textResponse) {
                 responseText = "✅ *Generation Complete*\n\nText response sent!";
-            } else if (generatedFiles.length > 0) {
-                responseText = "✅ *Generation Complete*\n\nGenerated images sent!";
             } else {
                 responseText = "⚠️ *No Content Generated*\n\nGemini didn't generate any content for this prompt.";
             }
@@ -263,10 +201,6 @@ class GeminiModule {
             'image/bmp': '.bmp'
         };
         return extensions[mimeType] || '.png';
-    }
-
-    async init() {
-        console.log('Gemini AI module initialized');
     }
 
     async destroy() {
