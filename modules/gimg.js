@@ -1,4 +1,3 @@
-
 const { GoogleGenAI } = require("@google/genai");
 const fs = require("fs");
 const path = require("path");
@@ -41,7 +40,7 @@ class GimgModule {
 
         try {
             const response = await this.ai.models.generateContent({
-                model: "gemini-2.0-flash-preview-image-generation",
+                model: "gemini-2.5-flash",
                 contents: [{ text: prompt }],
             });
 
