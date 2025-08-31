@@ -35,7 +35,7 @@ class GeminiModule {
             throw new Error("❌ Gemini API key not configured");
         }
         this.genAI = new GoogleGenerativeAI(this.GEMINI_API_KEY);
-        this.model = this.genAI.getGenerativeModel({ model: "gemini-2.0-flash-exp" });
+        this.model = this.genAI.getGenerativeModel({ model: "gemini-2.5-flash-image-preview" });
         console.log("✅ Gemini AI module initialized");
     }
 
