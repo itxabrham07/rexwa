@@ -151,10 +151,10 @@ class GeminiModule {
             if (textResponse) {
                 const cleanText = textResponse.trim();
                 // Split long messages to avoid Telegram limits
-                const maxLength = 4000;
+                            await this.bot.sendMessage(context.chatId, `🤖 **Gemini Response** (Part ${Math.floor(i/maxLength) + 1}):\n\n${chunk}`);
                 if (cleanText.length > maxLength) {
                     for (let i = 0; i < cleanText.length; i += maxLength) {
-                        const chunk = cleanText.substring(i, i + maxLength);
+                        await this.bot.sendMessage(context.chatId, `🤖 **Gemini Response:**\n\n${cleanText}`);
                         await this.bot.sendMessage(msg.chat.id, `🤖 **Gemini Response** (Part ${Math.floor(i/maxLength) + 1}):\n\n${chunk}`);
                     }
                 } else {
