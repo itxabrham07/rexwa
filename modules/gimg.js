@@ -15,7 +15,7 @@ class GeminiModule {
         };
         
         // Add your Gemini API key here
-        this.GEMINI_API_KEY = "YOUR_GEMINI_API_KEY_HERE";
+        this.GEMINI_API_KEY = "AIzaSyAipn0J_8OzXfZWLt2l_Pn0jb28lkzAtZ0";
         this.genAI = null;
         this.model = null;
         
