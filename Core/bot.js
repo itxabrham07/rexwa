@@ -1,4 +1,7 @@
-import makeWASocket, { 
+import Baileys from '@whiskeysockets/baileys';
+// Destructure all required exports from the default Baileys object
+const {
+    makeWASocket, 
     useMultiFileAuthState, 
     DisconnectReason, 
     fetchLatestBaileysVersion, 
@@ -7,13 +10,16 @@ import makeWASocket, {
     isJidNewsletter, 
     delay, 
     proto 
-} from '@whiskeysockets/baileys';
+} = Baileys;
+
 import qrcode from 'qrcode-terminal';
 import fs from 'fs-extra';
 import path from 'path';
 import NodeCache from 'node-cache';
+
+// NOTE: Using specific file extensions and paths to resolve the previous ERR_MODULE_NOT_FOUND
 import { makeInMemoryStore } from './store.js'; 
-import config from '../config.js';
+import config from '../config.js'; // Assuming config is at ../config.js (or adjust to ../config/index.js if sure)
 import logger from './logger.js';
 import MessageHandler from './message-handler.js';
 import { connectDb } from '../utils/db.js';
@@ -111,7 +117,7 @@ class HyperWaBot {
 
         if (config.get('telegram.enabled')) {
             try {
-                // Use dynamic import for optional dependencies in CJS/ESM
+                // Dynamic import pattern for optional, potentially CJS, dependencies
                 const TelegramBridgeModule = await import('../telegram/bridge.js'); 
                 const TelegramBridge = TelegramBridgeModule.default || TelegramBridgeModule.TelegramBridge;
 
@@ -159,8 +165,7 @@ class HyperWaBot {
             }
         } else {
             logger.info('🔧 Using file-based auth state...');
-            // NOTE: The auth state automatically handles the new 'lid-mapping' keys on update.
-            ({ state, saveCreds } = await useMultiFileAuthState(this.authPath)); 
+            ({ state, saveCreds } = await useMultiFileAuthState(this.authPath));
         }
 
         const { version, isLatest } = await fetchLatestBaileysVersion();
@@ -239,10 +244,8 @@ class HyperWaBot {
 
     /**
      * Get contact information from store
-     * NOTE: Baileys v7 now uses LIDs. jid will often be a LID (user@lid).
      */
     getContactInfo(jid) {
-        // Contact data will have 'id' (preferred LID/PN), 'phoneNumber', and 'lid' fields
         return this.store.contacts[jid] || null;
     }
 
@@ -283,7 +286,6 @@ class HyperWaBot {
      * Get group metadata with participant info
      */
     getGroupInfo(jid) {
-        // GroupMetadata fields are now LIDs, but include 'ownerPn', 'descOwnerPn', etc. for PNs
         const metadata = this.store.groupMetadata[jid];
         const chat = this.store.chats[jid];
         return {
@@ -303,7 +305,6 @@ class HyperWaBot {
         for (const chatId of Object.keys(this.store.messages)) {
             const messages = this.store.getMessages(chatId);
             const userMessages = messages.filter(msg => 
-                // msg.key.participant and msg.key.remoteJid will use the preferred ID (LID or PN)
                 msg.key?.participant === jid || msg.key?.remoteJid === jid
             );
             
@@ -349,8 +350,7 @@ class HyperWaBot {
             
             for (const msg of messages) {
                 const timestamp = new Date(msg.messageTimestamp * 1000).toLocaleString();
-                // When using LIDs, participant/remoteJidAlt (PN) may be helpful here
-                const sender = msg.key.fromMe ? 'You' : (contact?.name || msg.key.participant || msg.key.participantAlt || 'Unknown'); 
+                const sender = msg.key.fromMe ? 'You' : (contact?.name || msg.key.participant || msg.key.participantAlt || 'Unknown');
                 const text = msg.message?.conversation || msg.message?.extendedTextMessage?.text || '[Media/Other]';
                 textExport += `[${timestamp}] ${sender}: ${text}\n`;
             }
@@ -372,7 +372,6 @@ class HyperWaBot {
                     await saveCreds();
                 }
                 
-                // New v7 event for LID/PN mapping updates
                 if (events['lid-mapping.update']) {
                     logger.info('🗺️ LID Mapping Update:', events['lid-mapping.update']);
                 }
@@ -433,8 +432,6 @@ class HyperWaBot {
 
                     if (events['contacts.update']) {
                         for (const contact of events['contacts.update']) {
-                            // contact.id is the preferred ID (LID or PN). 
-                            // contact.phoneNumber or contact.lid will also be present
                             if (typeof contact.imgUrl !== 'undefined') {
                                 logger.info(`👤 Contact ${contact.id} profile pic updated`);
                             }
@@ -537,7 +534,6 @@ class HyperWaBot {
 
         // Enhanced auto-reply with user stats
         if (!msg.key.fromMe && this.autoReply && !isJidNewsletter(msg.key?.remoteJid)) {
-            // jid is the LID/PN that sent the message
             const senderJid = msg.key.participant || msg.key.remoteJid;
             const userStats = this.getUserStats(senderJid);
             const contactInfo = this.getContactInfo(senderJid);
@@ -592,7 +588,7 @@ class HyperWaBot {
 
         if (this.telegramBridge) {
             try {
-                // Assuming setupWhatsAppHandlers is now an ESM import
+                // Dynamically import TelegramBridge again for safety when setting up handlers
                 const TelegramBridgeModule = await import('../telegram/bridge.js'); 
                 const TelegramBridgeInstance = TelegramBridgeModule.default || TelegramBridgeModule.TelegramBridge;
                 
@@ -601,7 +597,6 @@ class HyperWaBot {
                 } else {
                     await this.telegramBridge.setupWhatsAppHandlers();
                 }
-
             } catch (err) {
                 logger.warn('⚠️ Failed to setup Telegram WhatsApp handlers:', err.message);
             }
@@ -705,7 +700,6 @@ class HyperWaBot {
         }
 
         if (this.sock) {
-
             await this.sock.end();
         }
 
@@ -713,5 +707,4 @@ class HyperWaBot {
     }
 }
 
-// Fixed: Exporting with ESM syntax
 export { HyperWaBot };
