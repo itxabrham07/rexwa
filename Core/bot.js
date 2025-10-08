@@ -1,16 +1,17 @@
-import { Boom } from '@hapi/boom';
-import makeWASocket, {
-    DisconnectReason,
-    fetchLatestBaileysVersion,
-    makeCacheableSignalKeyStore,
-    useMultiFileAuthState,
-    getAggregateVotesInPollMessage,
-    isJidNewsletter,
-    delay
-} from '@whiskeysockets/baileys';
+import Baileys from '@whiskeysockets/baileys';
+// Destructure all required exports from the default Baileys object
+const {
+    makeWASocket, 
+    useMultiFileAuthState, 
+    DisconnectReason, 
+    fetchLatestBaileysVersion, 
+    makeCacheableSignalKeyStore, 
+    getAggregateVotesInPollMessage, 
+    isJidNewsletter, 
+    delay, 
+    proto 
+} = Baileys;
 
-import * as WA from '@whiskeysockets/baileys';
-const proto = WA.proto; 
 import qrcode from 'qrcode-terminal';
 import fs from 'fs-extra';
 import path from 'path';
@@ -167,8 +168,8 @@ class HyperWaBot {
             ({ state, saveCreds } = await useMultiFileAuthState(this.authPath));
         }
 
-        const { version, isLatest } = await Baileys.fetchLatestBaileysVersion();
-    logger.info(`📱 Using WA v${version.join('.')}, isLatest: ${isLatest}`);
+        const { version, isLatest } = await fetchLatestBaileysVersion();
+        logger.info(`📱 Using WA v${version.join('.')}, isLatest: ${isLatest}`);
 
         try {
             this.sock = makeWASocket({
