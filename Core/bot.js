@@ -1,18 +1,16 @@
-import Baileys, {
-    useMultiFileAuthState, 
-    DisconnectReason, 
-    fetchLatestBaileysVersion, // <--- Explicitly import the function as named export
-    makeCacheableSignalKeyStore, 
-    getAggregateVotesInPollMessage, 
-    isJidNewsletter, 
-    delay, 
-    proto 
+import { Boom } from '@hapi/boom';
+import makeWASocket, {
+    DisconnectReason,
+    fetchLatestBaileysVersion,
+    makeCacheableSignalKeyStore,
+    useMultiFileAuthState,
+    getAggregateVotesInPollMessage,
+    isJidNewsletter,
+    delay
 } from '@whiskeysockets/baileys';
 
-// Make makeWASocket available (it is often the default export of the module)
-const makeWASocket = Baileys.default || Baileys; 
-
-
+import * as WA from '@whiskeysockets/baileys';
+const proto = WA.proto; 
 import qrcode from 'qrcode-terminal';
 import fs from 'fs-extra';
 import path from 'path';
