@@ -1,16 +1,14 @@
-import Baileys from '@whiskeysockets/baileys';
-// Destructure all required exports from the default Baileys object
-const {
-    makeWASocket, 
-    useMultiFileAuthState, 
-    DisconnectReason, 
-    fetchLatestBaileysVersion, 
-    makeCacheableSignalKeyStore, 
-    getAggregateVotesInPollMessage, 
-    isJidNewsletter, 
-    delay, 
-    proto 
-} = Baileys;
+import {
+    makeWASocket,  
+    useMultiFileAuthState,  
+    DisconnectReason,  
+    fetchLatestBaileysVersion,  // <-- Directly import the function
+    makeCacheableSignalKeyStore,  
+    getAggregateVotesInPollMessage,  
+    isJidNewsletter,  
+    delay,  
+    proto // Note: 'proto' might also be a named export in some versions
+} from '@whiskeysockets/baileys';
 
 import qrcode from 'qrcode-terminal';
 import fs from 'fs-extra';
