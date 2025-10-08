@@ -136,24 +136,63 @@ class HyperWaBot {
         this.sock = null;
     }
 
+    // Choose auth method based on configuration
     if (this.useMongoAuth) {
         logger.info('🔧 Using MongoDB auth state...');
         try {
             ({ state, saveCreds } = await useMongoAuthState());
+            
+            // CRITICAL: Validate MongoDB auth state
+            if (!state || !state.creds || !state.keys) {
+                logger.warn('⚠️ MongoDB auth state is incomplete or empty!');
+                logger.info('📋 State validation:', {
+                    hasState: !!state,
+                    hasCreds: !!state?.creds,
+                    hasKeys: !!state?.keys,
+                    credsRegistrationId: state?.creds?.registrationId,
+                    keysCount: state?.keys ? Object.keys(state.keys).length : 0
+                });
+                
+                // If MongoDB state is invalid, clear it and use file-based
+                logger.warn('🗑️ Clearing invalid MongoDB session...');
+                try {
+                    const db = await connectDb();
+                    await db.collection("auth").deleteOne({ _id: "session" });
+                    logger.info('✅ Invalid MongoDB session cleared');
+                } catch (cleanError) {
+                    logger.error('❌ Failed to clear MongoDB session:', cleanError);
+                }
+                
+                logger.info('🔄 Switching to file-based auth to generate new session...');
+                ({ state, saveCreds } = await useMultiFileAuthState(this.authPath));
+                this.useMongoAuth = false; // Temporarily disable until new session is created
+            } else {
+                logger.info('✅ MongoDB auth state validated successfully');
+            }
         } catch (error) {
             logger.error('❌ Failed to initialize MongoDB auth state:', error);
             logger.info('🔄 Falling back to file-based auth...');
             ({ state, saveCreds } = await useMultiFileAuthState(this.authPath));
+            this.useMongoAuth = false;
         }
     } else {
         logger.info('🔧 Using file-based auth state...');
         ({ state, saveCreds } = await useMultiFileAuthState(this.authPath));
     }
 
+    // Final validation before creating socket
+    if (!state?.creds?.registrationId) {
+        logger.error('❌ Auth state is invalid - missing registration ID');
+        logger.info('🔄 This appears to be a fresh session, will generate QR code...');
+    }
+
     const { version, isLatest } = await fetchLatestBaileysVersion();
     logger.info(`📱 Using WA v${version.join('.')}, isLatest: ${isLatest}`);
 
     try {
+        // Wrap socket creation in detailed try-catch
+        logger.info('🔨 Creating WhatsApp socket...');
+        
         this.sock = makeWASocket({
             auth: {
                 creds: state.creds,
@@ -171,64 +210,107 @@ class HyperWaBot {
             firewall: false
         });
 
+        logger.info('✅ WhatsApp socket created successfully');
+
+        // Bind store to socket events
         this.store.bind(this.sock.ev);
         logger.info('🔗 Store bound to WhatsApp socket events');
 
         // Setup event handlers BEFORE waiting for connection
         this.setupEnhancedEventHandlers(saveCreds);
 
+        // Wait for connection with better promise handling
         const connectionPromise = new Promise((resolve, reject) => {
+            let isResolved = false;
+            
             const connectionTimeout = setTimeout(() => {
-                if (!this.sock.user) {
-                    logger.warn('❌ QR code scan timed out after 30 seconds');
+                if (!isResolved && !this.sock.user) {
+                    isResolved = true;
+                    logger.warn('⏱️ QR code scan timed out after 30 seconds');
                     reject(new Error('QR code scan timed out'));
                 }
             }, 30000);
 
             this.sock.ev.on('connection.update', update => {
+                if (isResolved) return;
+                
                 if (update.connection === 'open') {
+                    isResolved = true;
                     clearTimeout(connectionTimeout);
+                    logger.info('✅ Connection established successfully');
                     resolve();
                 } else if (update.connection === 'close') {
-                    clearTimeout(connectionTimeout);
-                    // Let the connection.update handler manage reconnection
-                    resolve();
+                    const statusCode = update.lastDisconnect?.error?.output?.statusCode;
+                    if (statusCode === DisconnectReason.loggedOut) {
+                        isResolved = true;
+                        clearTimeout(connectionTimeout);
+                        reject(new Error('Logged out - please scan QR code again'));
+                    }
+                    // Let handleConnectionUpdate manage other close scenarios
                 }
             });
         });
 
+        logger.info('⏳ Waiting for WhatsApp connection...');
         await connectionPromise;
-    } catch (error) {
-        // Log the full error with stack trace
-        logger.error('❌ Failed to initialize WhatsApp socket:');
-        logger.error('Error name:', error.name);
-        logger.error('Error message:', error.message);
-        logger.error('Error stack:', error.stack);
         
-        // Additional diagnostics
-        logger.error('Auth state check:', {
+    } catch (error) {
+        // Enhanced error logging with type checking
+        logger.error('❌ Failed to initialize WhatsApp socket');
+        
+        // Log error details safely
+        if (error) {
+            logger.error('Error type:', typeof error);
+            logger.error('Error name:', error.name || 'Unknown');
+            logger.error('Error message:', error.message || 'No message');
+            logger.error('Error stack:', error.stack || 'No stack trace');
+            
+            // Check if it's a Boom error
+            if (error.isBoom) {
+                logger.error('Boom error output:', error.output);
+            }
+            
+            // Log the entire error object structure
+            try {
+                logger.error('Full error object:', JSON.stringify(error, Object.getOwnPropertyNames(error), 2));
+            } catch (jsonError) {
+                logger.error('Could not stringify error:', jsonError.message);
+            }
+        } else {
+            logger.error('Error is null or undefined');
+        }
+        
+        // Log auth state for debugging
+        logger.error('Auth state debug:', {
             hasCreds: !!state?.creds,
             hasKeys: !!state?.keys,
-            credsKeys: state?.creds ? Object.keys(state.creds) : []
+            hasRegistrationId: !!state?.creds?.registrationId,
+            credsKeys: state?.creds ? Object.keys(state.creds).slice(0, 10) : [],
+            keysCount: state?.keys ? Object.keys(state.keys).length : 0
         });
-        
-        logger.info('🔄 Retrying with new QR code in 5 seconds...');
         
         // Clean up before retry
         if (this.sock) {
             try {
+                logger.info('🧹 Cleaning up failed socket...');
                 this.sock.ev.removeAllListeners();
                 await this.sock.end();
             } catch (cleanupError) {
-                logger.warn('Cleanup error:', cleanupError.message);
+                logger.warn('⚠️ Cleanup error:', cleanupError.message);
             }
             this.sock = null;
         }
         
+        // If this was a MongoDB auth failure, switch to file-based for next attempt
+        if (this.useMongoAuth && (!state?.creds?.registrationId)) {
+            logger.warn('🔄 Switching to file-based auth due to invalid MongoDB state');
+            this.useMongoAuth = false;
+        }
+        
+        logger.info('🔄 Retrying with new QR code in 5 seconds...');
         setTimeout(() => this.startWhatsApp(), 5000);
     }
 }
-
     async getMessage(key) {
         try {
             if (key?.remoteJid && key?.id) {
