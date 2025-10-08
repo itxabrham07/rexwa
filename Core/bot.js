@@ -126,81 +126,108 @@ class HyperWaBot {
         logger.info('✅ HyperWa Userbot v3.0 initialized successfully!');
     }
 
-    async startWhatsApp() {
-        let state, saveCreds;
+ async startWhatsApp() {
+    let state, saveCreds;
 
-        if (this.sock) {
-            logger.info('🧹 Cleaning up existing WhatsApp socket');
-            this.sock.ev.removeAllListeners();
-            await this.sock.end();
-            this.sock = null;
-        }
+    if (this.sock) {
+        logger.info('🧹 Cleaning up existing WhatsApp socket');
+        this.sock.ev.removeAllListeners();
+        await this.sock.end();
+        this.sock = null;
+    }
 
-        if (this.useMongoAuth) {
-            logger.info('🔧 Using MongoDB auth state...');
-            try {
-                ({ state, saveCreds } = await useMongoAuthState());
-            } catch (error) {
-                logger.error('❌ Failed to initialize MongoDB auth state:', error);
-                logger.info('🔄 Falling back to file-based auth...');
-                ({ state, saveCreds } = await useMultiFileAuthState(this.authPath));
-            }
-        } else {
-            logger.info('🔧 Using file-based auth state...');
+    if (this.useMongoAuth) {
+        logger.info('🔧 Using MongoDB auth state...');
+        try {
+            ({ state, saveCreds } = await useMongoAuthState());
+        } catch (error) {
+            logger.error('❌ Failed to initialize MongoDB auth state:', error);
+            logger.info('🔄 Falling back to file-based auth...');
             ({ state, saveCreds } = await useMultiFileAuthState(this.authPath));
         }
-
-        const { version, isLatest } = await fetchLatestBaileysVersion();
-        logger.info(`📱 Using WA v${version.join('.')}, isLatest: ${isLatest}`);
-
-        try {
-            this.sock = makeWASocket({
-                auth: {
-                    creds: state.creds,
-                    keys: makeCacheableSignalKeyStore(state.keys, logger.child({ module: 'signal-keys' })),
-                },
-                version,
-                printQRInTerminal: false,
-                logger: logger.child({ module: 'baileys' }),
-                msgRetryCounterCache: this.msgRetryCounterCache,
-                generateHighQualityLinkPreview: true,
-                getMessage: this.getMessage.bind(this),
-                browser: ['HyperWa', 'Chrome', '3.0'],
-                syncFullHistory: false,
-                markOnlineOnConnect: true,
-                firewall: false
-            });
-
-            this.store.bind(this.sock.ev);
-            logger.info('🔗 Store bound to WhatsApp socket events');
-
-            const connectionPromise = new Promise((resolve, reject) => {
-                const connectionTimeout = setTimeout(() => {
-                    if (!this.sock.user) {
-                        logger.warn('❌ QR code scan timed out after 30 seconds');
-                        this.sock.ev.removeAllListeners();
-                        this.sock.end();
-                        this.sock = null;
-                        reject(new Error('QR code scan timed out'));
-                    }
-                }, 30000);
-
-                this.sock.ev.on('connection.update', update => {
-                    if (update.connection === 'open') {
-                        clearTimeout(connectionTimeout);
-                        resolve();
-                    }
-                });
-            });
-
-            this.setupEnhancedEventHandlers(saveCreds);
-            await connectionPromise;
-        } catch (error) {
-            logger.error('❌ Failed to initialize WhatsApp socket:', error);
-            logger.info('🔄 Retrying with new QR code...');
-            setTimeout(() => this.startWhatsApp(), 5000);
-        }
+    } else {
+        logger.info('🔧 Using file-based auth state...');
+        ({ state, saveCreds } = await useMultiFileAuthState(this.authPath));
     }
+
+    const { version, isLatest } = await fetchLatestBaileysVersion();
+    logger.info(`📱 Using WA v${version.join('.')}, isLatest: ${isLatest}`);
+
+    try {
+        this.sock = makeWASocket({
+            auth: {
+                creds: state.creds,
+                keys: makeCacheableSignalKeyStore(state.keys, logger.child({ module: 'signal-keys' })),
+            },
+            version,
+            printQRInTerminal: false,
+            logger: logger.child({ module: 'baileys' }),
+            msgRetryCounterCache: this.msgRetryCounterCache,
+            generateHighQualityLinkPreview: true,
+            getMessage: this.getMessage.bind(this),
+            browser: ['HyperWa', 'Chrome', '3.0'],
+            syncFullHistory: false,
+            markOnlineOnConnect: true,
+            firewall: false
+        });
+
+        this.store.bind(this.sock.ev);
+        logger.info('🔗 Store bound to WhatsApp socket events');
+
+        // Setup event handlers BEFORE waiting for connection
+        this.setupEnhancedEventHandlers(saveCreds);
+
+        const connectionPromise = new Promise((resolve, reject) => {
+            const connectionTimeout = setTimeout(() => {
+                if (!this.sock.user) {
+                    logger.warn('❌ QR code scan timed out after 30 seconds');
+                    reject(new Error('QR code scan timed out'));
+                }
+            }, 30000);
+
+            this.sock.ev.on('connection.update', update => {
+                if (update.connection === 'open') {
+                    clearTimeout(connectionTimeout);
+                    resolve();
+                } else if (update.connection === 'close') {
+                    clearTimeout(connectionTimeout);
+                    // Let the connection.update handler manage reconnection
+                    resolve();
+                }
+            });
+        });
+
+        await connectionPromise;
+    } catch (error) {
+        // Log the full error with stack trace
+        logger.error('❌ Failed to initialize WhatsApp socket:');
+        logger.error('Error name:', error.name);
+        logger.error('Error message:', error.message);
+        logger.error('Error stack:', error.stack);
+        
+        // Additional diagnostics
+        logger.error('Auth state check:', {
+            hasCreds: !!state?.creds,
+            hasKeys: !!state?.keys,
+            credsKeys: state?.creds ? Object.keys(state.creds) : []
+        });
+        
+        logger.info('🔄 Retrying with new QR code in 5 seconds...');
+        
+        // Clean up before retry
+        if (this.sock) {
+            try {
+                this.sock.ev.removeAllListeners();
+                await this.sock.end();
+            } catch (cleanupError) {
+                logger.warn('Cleanup error:', cleanupError.message);
+            }
+            this.sock = null;
+        }
+        
+        setTimeout(() => this.startWhatsApp(), 5000);
+    }
+}
 
     async getMessage(key) {
         try {
