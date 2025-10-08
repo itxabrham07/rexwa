@@ -1,8 +1,8 @@
-const { GoogleGenerativeAI, HarmBlockThreshold, HarmCategory } = require('@google/generative-ai');
-const { downloadContentFromMessage } = require('@whiskeysockets/baileys');
-const config = require('../config');
-const logger = require('../Core/logger');
-const Database = require('../utils/db');
+import {  GoogleGenerativeAI, HarmBlockThreshold, HarmCategory  } from '@google/generative-ai';
+import {  downloadContentFromMessage  } from '@whiskeysockets/baileys';
+import config from '../config.js';
+import logger from '../Core/logger.js';
+import Database from '../utils/db.js';
 
 class ChatBotModule {
     constructor(bot) {
@@ -829,4 +829,4 @@ Keep responses concise but informative. Be engaging and personable.`;
 
 }
 
-module.exports = ChatBotModule;
+export default ChatBotModule;

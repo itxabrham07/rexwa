@@ -1,7 +1,8 @@
-const os = require('os');
-const fs = require('fs-extra');
-const path = require('path');
-const { execSync } = require('child_process');
+import os from 'os';
+import fs from 'fs-extra';
+import path from 'path';
+import {  execSync  } from 'child_process';
+import axios from 'axios';
 
 class ServerInfo {
     constructor(bot) {
@@ -319,7 +320,7 @@ class ServerInfo {
             
             // Try to get external IP
             try {
-                const axios = require('axios');
+                // axios imported at top
                 const response = await axios.get('https://api.ipify.org?format=json', { timeout: 5000 });
                 netInfo += `🌍 *External IP:* ${response.data.ip}\n`;
             } catch (error) {
@@ -503,7 +504,7 @@ class ServerInfo {
         
         try {
             // Simple speed test using download time
-            const axios = require('axios');
+            // axios imported at top
             const testUrl = 'https://httpbin.org/bytes/1048576'; // 1MB test file
             
             const startTime = Date.now();
@@ -589,4 +590,4 @@ class ServerInfo {
     }
 }
 
-module.exports = ServerInfo;
+export default ServerInfo;

@@ -1,6 +1,6 @@
 
-const config = require('../config');
-const helpers = require('../utils/helpers');
+import config from '../config.js';
+import helpers from '../utils/helpers.js';
 
 class GroupManagement {
     constructor(bot) {
@@ -657,4 +657,4 @@ class GroupManagement {
     }
 }
 
-module.exports = GroupManagement;
+export default GroupManagement;

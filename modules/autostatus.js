@@ -1,5 +1,5 @@
-const config = require('../config');
-const logger = require('../Core/logger');
+import config from '../config.js';
+import logger from '../Core/logger.js';
 
 class StatusViewerModule {
     constructor(bot) {
@@ -129,4 +129,4 @@ class StatusViewerModule {
 
 }
 
-module.exports = StatusViewerModule;
+export default StatusViewerModule;

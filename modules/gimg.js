@@ -1,6 +1,6 @@
-const { GoogleGenAI } = require("@google/genai");
-const fs = require("fs");
-const path = require("path");
+import {  GoogleGenAI  } from '@google/genai';
+import fs from 'fs';
+import path from 'path';
 
 class GimgModule {
     constructor(bot) {
@@ -84,4 +84,4 @@ class GimgModule {
     }
 }
 
-module.exports = GimgModule;
+export default GimgModule;

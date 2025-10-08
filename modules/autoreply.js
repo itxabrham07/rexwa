@@ -1,6 +1,6 @@
-const config = require('../config');
-const logger = require('../Core/logger');
-const { isJidNewsletter } = require('@whiskeysockets/baileys');
+import config from '../config.js';
+import logger from '../Core/logger.js';
+import { isJidNewsletter } from '@whiskeysockets/baileys';
 
 class AutoReplyModule {
     constructor(bot) {
@@ -106,4 +106,4 @@ class AutoReplyModule {
 
 }
 
-module.exports = AutoReplyModule;
+export default AutoReplyModule;

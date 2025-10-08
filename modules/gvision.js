@@ -1,7 +1,7 @@
-const { GoogleGenerativeAI, HarmBlockThreshold, HarmCategory } = require('@google/generative-ai');
-const { downloadContentFromMessage } = require('@whiskeysockets/baileys');
-const config = require('../config');
-const logger = require('../Core/logger');
+import {  GoogleGenerativeAI, HarmBlockThreshold, HarmCategory  } from '@google/generative-ai';
+import {  downloadContentFromMessage  } from '@whiskeysockets/baileys';
+import config from '../config.js';
+import logger from '../Core/logger.js';
 
 /**
  * GeminiVisionModule: A module for analyzing images and videos using Google Gemini Vision API.
@@ -410,4 +410,4 @@ class GeminiVisionModule {
   }
 }
 
-module.exports = GeminiVisionModule;
+export default GeminiVisionModule;

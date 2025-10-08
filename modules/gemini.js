@@ -1,4 +1,4 @@
-const { GoogleGenerativeAI, HarmBlockThreshold, HarmCategory } = require('@google/generative-ai');
+import {  GoogleGenerativeAI, HarmBlockThreshold, HarmCategory  } from '@google/generative-ai';
 
 class GeminiAdvancedModule {
     constructor(bot) {
@@ -430,4 +430,4 @@ Be creative, practical, and think from multiple angles.`;
 
 }
 
-module.exports = GeminiAdvancedModule;
+export default GeminiAdvancedModule;
