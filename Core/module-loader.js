@@ -5,6 +5,7 @@ import logger from './logger.js';
 import config from '../config.js';
 import helpers from '../utils/helpers.js';
 
+// ES Module equivalent for __filename and __dirname
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
 
@@ -39,6 +40,7 @@ class ModuleLoader {
                         text: '⚡ *Loading Module*\n\n🔄 Downloading and installing module...\n⏳ Please wait...'
                     });
 
+                    // Dynamic import for baileys, using destructuring on the result
                     const { downloadContentFromMessage } = await import('@whiskeysockets/baileys');
                     const stream = await downloadContentFromMessage(msg.message.documentMessage, 'document');
 
@@ -48,7 +50,6 @@ class ModuleLoader {
                     }
                     const buffer = Buffer.concat(chunks);
 
-                    const fileName = msg.message.documentMessage.fileName;
                     const customModulesPath = path.join(__dirname, '../custom_modules');
                     await fs.ensureDir(customModulesPath);
 
@@ -349,8 +350,13 @@ await context.bot.sendMessage(context.sender, { text: helpText.trim() });
         const moduleId = path.basename(filePath, '.js');
 
         try {
-            const mod = await import(filePath + '?update=' + Date.now());
+            // Convert local file path to a URL for dynamic import
+            // Use a cache-busting parameter to force reload the module file
+            const moduleUrl = new URL(`file://${filePath}?update=${Date.now()}`); 
+            
+            const mod = await import(moduleUrl.href);
 
+            // Access the default export for class or object
             const moduleInstance = typeof mod.default === 'function' && /^\s*class\s/.test(mod.default.toString())
                                    ? new mod.default(this.bot)
                                    : (mod.default || mod);
@@ -446,20 +452,24 @@ const wrappedCmd = shouldWrap ? {
         if (!moduleInfo) {
             throw new Error(`Module ${moduleId} not found`);
         }
+        
+        // Fix: Declare moduleInstance from moduleInfo
+        const moduleInstance = moduleInfo.instance;
 
-        if (moduleInfo.instance.destroy && typeof moduleInfo.instance.destroy === 'function') {
-            await moduleInfo.instance.destroy();
+        if (moduleInstance.destroy && typeof moduleInstance.destroy === 'function') {
+            await moduleInstance.destroy();
         }
 
-        if (Array.isArray(moduleInfo.instance.commands)) {
-            for (const cmd of moduleInfo.instance.commands) {
+        if (Array.isArray(moduleInstance.commands)) {
+            for (const cmd of moduleInstance.commands) {
                 if (cmd.name) {
                     this.bot.messageHandler.unregisterCommandHandler(cmd.name);
                 }
             }
         }
-        if (moduleInstance.messageHooks && typeof moduleInfo.instance.messageHooks === 'object') {
-            for (const hook of Object.keys(moduleInfo.instance.messageHooks)) {
+        // Use moduleInstance here
+        if (moduleInstance.messageHooks && typeof moduleInstance.messageHooks === 'object') {
+            for (const hook of Object.keys(moduleInstance.messageHooks)) {
                 this.bot.messageHandler.unregisterMessageHook(hook);
             }
         }
