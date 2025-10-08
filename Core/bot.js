@@ -1,38 +1,27 @@
-import { Boom } from '@hapi/boom';
-import makeWASocket, {
-    DisconnectReason,
-    fetchLatestBaileysVersion,
-    makeCacheableSignalKeyStore,
-    useMultiFileAuthState,
-    getAggregateVotesInPollMessage,
-    isJidNewsletter,
-    delay
+import makeWASocket, { 
+    useMultiFileAuthState, 
+    DisconnectReason, 
+    fetchLatestBaileysVersion, 
+    makeCacheableSignalKeyStore, 
+    getAggregateVotesInPollMessage, 
+    isJidNewsletter, 
+    delay, 
+    proto 
 } from '@whiskeysockets/baileys';
-
-import * as WA from '@whiskeysockets/baileys';
-const proto = WA.proto; 
-
 import qrcode from 'qrcode-terminal';
 import fs from 'fs-extra';
+import path from 'path';
 import NodeCache from 'node-cache';
-import P from 'pino';
-import { makeInMemoryStore } from './store.js';
-import config from '../config.js';
+
+// NOTE: File extensions MUST be added for local imports in ESM.
+import { makeInMemoryStore } from './store.js'; // Adjusted path for ESM
+import config from '../config/index.js'; // Assuming config is an ESM export
+import logger from './logger.js';
 import MessageHandler from './message-handler.js';
 import { connectDb } from '../utils/db.js';
 import ModuleLoader from './module-loader.js';
-import { useMongoAuthState, clearMongoAuthState } from '../utils/mongoAuthState.js';
+import { useMongoAuthState } from '../utils/mongoAuthState.js';
 
-const logLevel = config.get('log.level') || 'info'; // Use a simple OR fallback
-
-// Initialize logger
-const logger = P({
-    level: logLevel, // Pass the guaranteed string level
-    transport: config.get('log.pretty', false) ? {
-        target: 'pino-pretty',
-        options: { colorize: true }
-    } : undefined
-});
 
 class HyperWaBot {
     constructor() {
@@ -46,38 +35,39 @@ class HyperWaBot {
         this.qrCodeSent = false;
         this.useMongoAuth = config.get('auth.useMongoAuth', false);
         
-        // Initialize the enhanced store
+        // Initialize the enhanced store with advanced options
         this.store = makeInMemoryStore({
             logger: logger.child({ module: 'store' }),
             filePath: config.get('store.filePath', './whatsapp-store.json'),
-            autoSaveInterval: config.get('store.autoSaveInterval', 30000)
+            autoSaveInterval: config.get('store.autoSaveInterval', 30000) // Save every 30 seconds
         });
 
         // Load existing store data on startup
         this.store.loadFromFile();
         
-        // Message retry cache (prevents decryption loops)
+        // Enhanced features from example - SIMPLE VERSION
         this.msgRetryCounterCache = new NodeCache({
             stdTTL: 300,
             maxKeys: 500
         });
-        
-        // On-demand history sync tracking
         this.onDemandMap = new Map();
+        this.autoReply = config.get('features.autoReply', false);
+        this.enableTypingIndicators = config.get('features.typingIndicators', true);
+        this.autoReadMessages = config.get('features.autoReadMessages', true);
         
-        // Memory cleanup for on-demand map
+        // Simple memory cleanup
         setInterval(() => {
             if (this.onDemandMap.size > 100) {
-                logger.debug('🧹 Clearing on-demand history map');
                 this.onDemandMap.clear();
             }
-        }, 300000); // Every 5 minutes
+        }, 300000);
 
-        // Store event listeners
+        // Store event listeners for advanced features
         this.setupStoreEventListeners();
     }
 
     setupStoreEventListeners() {
+        // Monitor store events for analytics and features
         this.store.on('messages.upsert', (data) => {
             logger.debug(`📝 Store: ${data.messages.length} messages cached`);
         });
@@ -98,9 +88,9 @@ class HyperWaBot {
     }
 
     getStoreStats() {
-        const chatCount = Object.keys(this.store.chats || {}).length;
-        const contactCount = Object.keys(this.store.contacts || {}).length;
-        const messageCount = Object.values(this.store.messages || {})
+        const chatCount = Object.keys(this.store.chats).length;
+        const contactCount = Object.keys(this.store.contacts).length;
+        const messageCount = Object.values(this.store.messages)
             .reduce((total, chatMessages) => total + Object.keys(chatMessages).length, 0);
         
         return {
@@ -111,7 +101,7 @@ class HyperWaBot {
     }
 
     async initialize() {
-        logger.info('🔧 Initializing HyperWa Userbot...');
+        logger.info('🔧 Initializing HyperWa Userbot with Enhanced Store...');
 
         try {
             this.db = await connectDb();
@@ -121,10 +111,12 @@ class HyperWaBot {
             process.exit(1);
         }
 
-        // Initialize Telegram bridge if enabled
         if (config.get('telegram.enabled')) {
             try {
-                const { default: TelegramBridge } = await import('../telegram/bridge.js');
+                // Use dynamic import for optional dependencies in CJS/ESM
+                const TelegramBridgeModule = await import('../telegram/bridge.js'); 
+                const TelegramBridge = TelegramBridgeModule.default || TelegramBridgeModule.TelegramBridge;
+
                 this.telegramBridge = new TelegramBridge(this);
                 await this.telegramBridge.initialize();
                 logger.info('✅ Telegram bridge initialized');
@@ -143,7 +135,7 @@ class HyperWaBot {
         await this.moduleLoader.loadModules();
         await this.startWhatsApp();
 
-        logger.info('✅ HyperWa Userbot initialized successfully!');
+        logger.info('✅ HyperWa Userbot with Enhanced Store initialized successfully!');
     }
 
     async startWhatsApp() {
@@ -169,7 +161,8 @@ class HyperWaBot {
             }
         } else {
             logger.info('🔧 Using file-based auth state...');
-            ({ state, saveCreds } = await useMultiFileAuthState(this.authPath));
+            // NOTE: The auth state automatically handles the new 'lid-mapping' keys on update.
+            ({ state, saveCreds } = await useMultiFileAuthState(this.authPath)); 
         }
 
         const { version, isLatest } = await fetchLatestBaileysVersion();
@@ -188,134 +181,274 @@ class HyperWaBot {
                 generateHighQualityLinkPreview: true,
                 getMessage: this.getMessage.bind(this),
                 browser: ['HyperWa', 'Chrome', '3.0'],
-                syncFullHistory: false,
-                markOnlineOnConnect: true,
-                firewall: false
             });
 
-            // CRITICAL: Bind store to socket events
+            // CRITICAL: Bind store to socket events for data persistence
             this.store.bind(this.sock.ev);
             logger.info('🔗 Store bound to WhatsApp socket events');
 
+            const connectionPromise = new Promise((resolve, reject) => {
+                const connectionTimeout = setTimeout(() => {
+                    if (!this.sock.user) {
+                        logger.warn('❌ QR code scan timed out after 30 seconds');
+                        this.sock.ev.removeAllListeners();
+                        this.sock.end();
+                        this.sock = null;
+                        reject(new Error('QR code scan timed out'));
+                    }
+                }, 30000);
+
+                this.sock.ev.on('connection.update', update => {
+                    if (update.connection === 'open') {
+                        clearTimeout(connectionTimeout);
+                        resolve();
+                    }
+                });
+            });
+
             this.setupEnhancedEventHandlers(saveCreds);
+            await connectionPromise;
         } catch (error) {
             logger.error('❌ Failed to initialize WhatsApp socket:', error);
-            logger.info('🔄 Retrying in 5 seconds...');
+            logger.info('🔄 Retrying with new QR code...');
             setTimeout(() => this.startWhatsApp(), 5000);
         }
     }
 
-    /**
-     * Enhanced getMessage with store lookup
-     * Returns message content for decryption/verification
-     */
+    // Fixed: Using proto.Message.create() instead of .fromObject() for v7 compatibility
     async getMessage(key) {
-        try {
-            if (key?.remoteJid && key?.id) {
-                const storedMessage = this.store.loadMessage(key.remoteJid, key.id);
-                if (storedMessage) {
-                    logger.debug(`📨 Retrieved message from store: ${key.id}`);
-                    return storedMessage.message;
-                }
+        // Try to get message from store first
+        if (key?.remoteJid && key?.id) {
+            const storedMessage = this.store.loadMessage(key.remoteJid, key.id);
+            if (storedMessage) {
+                logger.debug(`📨 Retrieved message from store: ${key.id}`);
+                return storedMessage;
             }
-            
-            // Return undefined to let Baileys handle missing messages
-            return undefined;
-        } catch (error) {
-            logger.warn('⚠️ Error retrieving message:', error.message);
-            return undefined;
         }
+        
+        // Fallback to empty message using .create()
+        return proto.Message.create({ conversation: 'Message not found' });
+    }
+
+    // Store-powered helper methods
+    
+    /**
+     * Get chat information from store
+     */
+    getChatInfo(jid) {
+        return this.store.chats[jid] || null;
     }
 
     /**
-     * Setup enhanced event handlers with ev.process pattern
+     * Get contact information from store
+     * NOTE: Baileys v7 now uses LIDs. jid will often be a LID (user@lid).
      */
+    getContactInfo(jid) {
+        // Contact data will have 'id' (preferred LID/PN), 'phoneNumber', and 'lid' fields
+        return this.store.contacts[jid] || null;
+    }
+
+    /**
+     * Get all messages for a chat
+     */
+    getChatMessages(jid, limit = 50) {
+        const messages = this.store.getMessages(jid);
+        return messages.slice(-limit).reverse(); // Get latest messages
+    }
+
+    /**
+     * Search messages by text content
+     */
+    searchMessages(query, jid = null) {
+        const results = [];
+        const chatsToSearch = jid ? [jid] : Object.keys(this.store.messages);
+        
+        for (const chatId of chatsToSearch) {
+            const messages = this.store.getMessages(chatId);
+            for (const msg of messages) {
+                const text = msg.message?.conversation || 
+                           msg.message?.extendedTextMessage?.text || '';
+                if (text.toLowerCase().includes(query.toLowerCase())) {
+                    results.push({
+                        chatId,
+                        message: msg,
+                        text
+                    });
+                }
+            }
+        }
+        
+        return results.slice(0, 100); // Limit results
+    }
+
+    /**
+     * Get group metadata with participant info
+     */
+    getGroupInfo(jid) {
+        // GroupMetadata fields are now LIDs, but include 'ownerPn', 'descOwnerPn', etc. for PNs
+        const metadata = this.store.groupMetadata[jid];
+        const chat = this.store.chats[jid];
+        return {
+            metadata,
+            chat,
+            participants: metadata?.participants || []
+        };
+    }
+
+    /**
+     * Get user's message history statistics
+     */
+    getUserStats(jid) {
+        let messageCount = 0;
+        let lastMessageTime = null;
+        
+        for (const chatId of Object.keys(this.store.messages)) {
+            const messages = this.store.getMessages(chatId);
+            const userMessages = messages.filter(msg => 
+                // msg.key.participant and msg.key.remoteJid will use the preferred ID (LID or PN)
+                msg.key?.participant === jid || msg.key?.remoteJid === jid
+            );
+            
+            messageCount += userMessages.length;
+            
+            if (userMessages.length > 0) {
+                const lastMsg = userMessages[userMessages.length - 1];
+                const msgTime = lastMsg.messageTimestamp * 1000;
+                if (!lastMessageTime || msgTime > lastMessageTime) {
+                    lastMessageTime = msgTime;
+                }
+            }
+        }
+        
+        return {
+            messageCount,
+            lastMessageTime: lastMessageTime ? new Date(lastMessageTime) : null,
+            isActive: lastMessageTime && (Date.now() - lastMessageTime) < (7 * 24 * 60 * 60 * 1000) // Active in last 7 days
+        };
+    }
+
+    /**
+     * Export chat history
+     */
+    async exportChatHistory(jid, format = 'json') {
+        const chat = this.getChatInfo(jid);
+        const messages = this.getChatMessages(jid, 1000); // Last 1000 messages
+        const contact = this.getContactInfo(jid);
+        
+        const exportData = {
+            chat,
+            contact,
+            messages,
+            exportedAt: new Date().toISOString(),
+            totalMessages: messages.length
+        };
+
+        if (format === 'txt') {
+            let textExport = `Chat Export for ${contact?.name || jid}\n`;
+            textExport += `Exported on: ${new Date().toISOString()}\n`;
+            textExport += `Total Messages: ${messages.length}\n\n`;
+            textExport += '=' .repeat(50) + '\n\n';
+            
+            for (const msg of messages) {
+                const timestamp = new Date(msg.messageTimestamp * 1000).toLocaleString();
+                // When using LIDs, participant/remoteJidAlt (PN) may be helpful here
+                const sender = msg.key.fromMe ? 'You' : (contact?.name || msg.key.participant || msg.key.participantAlt || 'Unknown'); 
+                const text = msg.message?.conversation || msg.message?.extendedTextMessage?.text || '[Media/Other]';
+                textExport += `[${timestamp}] ${sender}: ${text}\n`;
+            }
+            
+            return textExport;
+        }
+
+        return exportData;
+    }
+
     setupEnhancedEventHandlers(saveCreds) {
         this.sock.ev.process(async (events) => {
             try {
-                // Connection updates
                 if (events['connection.update']) {
                     await this.handleConnectionUpdate(events['connection.update']);
                 }
 
-                // Credentials updated
                 if (events['creds.update']) {
                     await saveCreds();
                 }
+                
+                // New v7 event for LID/PN mapping updates
+                if (events['lid-mapping.update']) {
+                    logger.info('🗺️ LID Mapping Update:', events['lid-mapping.update']);
+                }
 
-                // New messages
                 if (events['messages.upsert']) {
                     await this.handleMessagesUpsert(events['messages.upsert']);
                 }
 
-                // Label association
-                if (events['labels.association']) {
-                    logger.debug('🏷️ Label association update:', events['labels.association']);
-                }
-
-                // Label edit
-                if (events['labels.edit']) {
-                    logger.debug('✏️ Label edit update:', events['labels.edit']);
-                }
-
-                // Call events
-                if (events.call) {
-                    logger.info('📞 Call event received:', events.call);
-                }
-
-                // History sync
-                if (events['messaging-history.set']) {
-                    const { chats, contacts, messages, isLatest, progress, syncType } = events['messaging-history.set'];
-                    if (syncType === proto.HistorySync.HistorySyncType.ON_DEMAND) {
-                        logger.info('📥 Received on-demand history sync, messages:', messages.length);
+                // Store automatically handles most events, but we can add custom logic
+                if (!process.env.DOCKER) {
+                    if (events['labels.association']) {
+                        logger.info('📋 Label association update:', events['labels.association']);
                     }
-                    logger.info(`📊 History sync: ${chats.length} chats, ${contacts.length} contacts, ${messages.length} msgs (latest: ${isLatest}, progress: ${progress}%)`);
-                }
 
-                // Message updates (delivery, read, delete)
-                if (events['messages.update']) {
-                    for (const { key, update } of events['messages.update']) {
-                        if (update.pollUpdates) {
-                            logger.info('📊 Poll update received for message:', key.id);
+                    if (events['labels.edit']) {
+                        logger.info('📝 Label edit update:', events['labels.edit']);
+                    }
+
+                    if (events.call) {
+                        logger.info('📞 Call event received:', events.call);
+                        // Store call information
+                        for (const call of events.call) {
+                            this.store.setCallOffer(call.from, call);
                         }
                     }
-                }
 
-                // Message receipts
-                if (events['message-receipt.update']) {
-                    logger.debug('📨 Message receipt update');
-                }
+                    if (events['messaging-history.set']) {
+                        const { chats, contacts, messages, isLatest, progress, syncType } = events['messaging-history.set'];
+                        if (syncType === proto.HistorySync.HistorySyncType.ON_DEMAND) {
+                            logger.info('📥 Received on-demand history sync, messages:', messages.length);
+                        }
+                        logger.info(`📊 History sync: ${chats.length} chats, ${contacts.length} contacts, ${messages.length} msgs (latest: ${isLatest}, progress: ${progress}%)`);
+                    }
 
-                // Reactions
-                if (events['messages.reaction']) {
-                    logger.info(`😀 Message reactions: ${events['messages.reaction'].length}`);
-                }
-
-                // Presence updates
-                if (events['presence.update']) {
-                    logger.debug('👤 Presence updates:', events['presence.update']);
-                }
-
-                // Chat updates
-                if (events['chats.update']) {
-                    logger.debug('💬 Chats updated:', events['chats.update'].length);
-                }
-
-                // Contact updates
-                if (events['contacts.update']) {
-                    for (const contact of events['contacts.update']) {
-                        if (typeof contact.imgUrl !== 'undefined') {
-                            logger.info(`👤 Contact ${contact.id} profile pic updated`);
+                    if (events['messages.update']) {
+                        for (const { key, update } of events['messages.update']) {
+                            if (update.pollUpdates) {
+                                logger.info('📊 Poll update received');
+                            }
                         }
                     }
-                }
 
-                // Chat deletions
-                if (events['chats.delete']) {
-                    logger.info('🗑️ Chats deleted:', events['chats.delete']);
+                    if (events['message-receipt.update']) {
+                        logger.debug('📨 Message receipt update');
+                    }
+
+                    if (events['messages.reaction']) {
+                        logger.info(`😀 Message reactions: ${events['messages.reaction'].length}`);
+                    }
+
+                    if (events['presence.update']) {
+                        logger.debug('👤 Presence updates');
+                    }
+
+                    if (events['chats.update']) {
+                        logger.debug('💬 Chats updated');
+                    }
+
+                    if (events['contacts.update']) {
+                        for (const contact of events['contacts.update']) {
+                            // contact.id is the preferred ID (LID or PN). 
+                            // contact.phoneNumber or contact.lid will also be present
+                            if (typeof contact.imgUrl !== 'undefined') {
+                                logger.info(`👤 Contact ${contact.id} profile pic updated`);
+                            }
+                        }
+                    }
+
+                    if (events['chats.delete']) {
+                        logger.info('🗑️ Chats deleted:', events['chats.delete']);
+                    }
                 }
             } catch (error) {
-                logger.error('⚠️ Event processing error:', error);
+                logger.warn('⚠️ Event processing error:', error.message);
             }
         });
     }
@@ -337,26 +470,29 @@ class HyperWaBot {
         }
 
         if (connection === 'close') {
-            const statusCode = lastDisconnect?.error?.output?.statusCode;
+            const statusCode = lastDisconnect?.error?.output?.statusCode || 0;
             const shouldReconnect = statusCode !== DisconnectReason.loggedOut;
-
-            logger.warn(`🔌 Connection closed. Status: ${statusCode}`);
 
             if (shouldReconnect && !this.isShuttingDown) {
                 logger.warn('🔄 Connection closed, reconnecting...');
+                // Save store before reconnecting
                 this.store.saveToFile();
                 setTimeout(() => this.startWhatsApp(), 5000);
             } else {
-                logger.error('❌ Connection closed permanently (logged out).');
+                logger.error('❌ Connection closed permanently. Please delete auth_info and restart.');
 
                 if (this.useMongoAuth) {
                     try {
-                        await clearMongoAuthState();
+                        const db = await connectDb();
+                        const coll = db.collection("auth");
+                        await coll.deleteOne({ _id: "session" });
+                        logger.info('🗑️ MongoDB auth session cleared');
                     } catch (error) {
                         logger.error('❌ Failed to clear MongoDB auth session:', error);
                     }
                 }
 
+                // Final store save
                 this.store.saveToFile();
                 process.exit(1);
             }
@@ -366,13 +502,6 @@ class HyperWaBot {
     }
 
     async handleMessagesUpsert(upsert) {
-        logger.debug(`📬 Messages upsert: type=${upsert.type}, count=${upsert.messages.length}`);
-
-        if (upsert.requestId) {
-            logger.info(`📋 Placeholder message received for request: ${upsert.requestId}`);
-        }
-
-        // Process messages
         if (upsert.type === 'notify') {
             for (const msg of upsert.messages) {
                 try {
@@ -383,14 +512,10 @@ class HyperWaBot {
             }
         }
 
-        // Pass to message handler
         try {
-            await this.messageHandler.handleMessages({ 
-                messages: upsert.messages, 
-                type: upsert.type 
-            });
+            await this.messageHandler.handleMessages({ messages: upsert.messages, type: upsert.type });
         } catch (error) {
-            logger.warn('⚠️ Message handler error:', error.message);
+            logger.warn('⚠️ Original message handler error:', error.message);
         }
     }
 
@@ -399,7 +524,7 @@ class HyperWaBot {
         
         if (!text) return;
 
-        // Handle special debug commands
+        // Handle special commands
         if (text === "requestPlaceholder" && !upsert.requestId) {
             const messageId = await this.sock.requestPlaceholderResend(msg.key);
             logger.info('🔄 Requested placeholder resync, ID:', messageId);
@@ -410,6 +535,52 @@ class HyperWaBot {
             const messageId = await this.sock.fetchMessageHistory(50, msg.key, msg.messageTimestamp);
             logger.info('📥 Requested on-demand sync, ID:', messageId);
             return;
+        }
+
+        // Enhanced auto-reply with user stats
+        if (!msg.key.fromMe && this.autoReply && !isJidNewsletter(msg.key?.remoteJid)) {
+            // jid is the LID/PN that sent the message
+            const senderJid = msg.key.participant || msg.key.remoteJid;
+            const userStats = this.getUserStats(senderJid);
+            const contactInfo = this.getContactInfo(senderJid);
+            
+            logger.info(`🤖 Auto-replying to: ${contactInfo?.name || senderJid} (${userStats.messageCount} messages)`);
+            
+            if (this.autoReadMessages) {
+                await this.sock.readMessages([msg.key]);
+            }
+            
+            let replyText = config.get('messages.autoReplyText', 'Hello there! This is an automated response.');
+            
+            // Personalize reply based on user history
+            if (userStats.messageCount > 10) {
+                replyText += `\n\nGood to hear from you again! 👋`;
+            } else if (userStats.messageCount === 0) {
+                replyText += `\n\nWelcome! This seems to be your first message. 🎉`;
+            }
+            
+            await this.sendMessageWithTyping({ text: replyText }, msg.key.remoteJid);
+        }
+    }
+
+    async sendMessageWithTyping(content, jid) {
+        if (!this.sock || !this.enableTypingIndicators) {
+            return await this.sock?.sendMessage(jid, content);
+        }
+
+        try {
+            await this.sock.presenceSubscribe(jid);
+            await delay(500);
+
+            await this.sock.sendPresenceUpdate('composing', jid);
+            await delay(2000);
+
+            await this.sock.sendPresenceUpdate('paused', jid);
+
+            return await this.sock.sendMessage(jid, content);
+        } catch (error) {
+            logger.warn('⚠️ Failed to send message with typing:', error.message);
+            return await this.sock.sendMessage(jid, content);
         }
     }
 
@@ -423,9 +594,18 @@ class HyperWaBot {
 
         if (this.telegramBridge) {
             try {
-                await this.telegramBridge.setupWhatsAppHandlers();
+                // Assuming setupWhatsAppHandlers is now an ESM import
+                const TelegramBridgeModule = await import('../telegram/bridge.js'); 
+                const TelegramBridgeInstance = TelegramBridgeModule.default || TelegramBridgeModule.TelegramBridge;
+                
+                if (this.telegramBridge instanceof TelegramBridgeInstance) {
+                    await this.telegramBridge.setupWhatsAppHandlers();
+                } else {
+                    await this.telegramBridge.setupWhatsAppHandlers();
+                }
+
             } catch (err) {
-                logger.warn('⚠️ Failed to setup Telegram handlers:', err.message);
+                logger.warn('⚠️ Failed to setup Telegram WhatsApp handlers:', err.message);
             }
         }
 
@@ -455,13 +635,14 @@ class HyperWaBot {
                               `• 🔐 Auth Method: ${authMethod}\n` +
                               `• 🤖 Telegram Bridge: ${config.get('telegram.enabled') ? '✅' : '❌'}\n` +
                               `• 🔧 Custom Modules: ${config.get('features.customModules') ? '✅' : '❌'}\n` +
+                              `• ⌨️ Typing Indicators: ${this.enableTypingIndicators ? '✅' : '❌'}\n` +
+                              `• 📖 Auto Read: ${this.autoReadMessages ? '✅' : '❌'}\n` +
+                              `• 🤖 Auto Reply: ${this.autoReply ? '✅' : '❌'}\n` +
                               `Type *${config.get('bot.prefix')}help* for available commands!`;
 
         try {
-            await this.sendMessage(owner, { text: startupMessage });
-        } catch (err) {
-            logger.warn('⚠️ Failed to send startup message:', err.message);
-        }
+            await this.sendMessageWithTyping({ text: startupMessage }, owner);
+        } catch {}
 
         if (this.telegramBridge) {
             try {
@@ -472,20 +653,49 @@ class HyperWaBot {
         }
     }
 
+    async connect() {
+        if (!this.sock) {
+            await this.startWhatsApp();
+        }
+        return this.sock;
+    }
+
     async sendMessage(jid, content) {
         if (!this.sock) {
             throw new Error('WhatsApp socket not initialized');
         }
         
+        if (this.enableTypingIndicators) {
+            return await this.sendMessageWithTyping(content, jid);
+        }
+        
         return await this.sock.sendMessage(jid, content);
+    }
+
+    // Configuration methods for new features
+    setAutoReply(enabled) {
+        this.autoReply = enabled;
+        config.set('features.autoReply', enabled);
+        logger.info(`🤖 Auto-reply ${enabled ? 'enabled' : 'disabled'}`);
+    }
+
+    setTypingIndicators(enabled) {
+        this.enableTypingIndicators = enabled;
+        config.set('features.typingIndicators', enabled);
+        logger.info(`⌨️ Typing indicators ${enabled ? 'enabled' : 'disabled'}`);
+    }
+
+    setAutoReadMessages(enabled) {
+        this.autoReadMessages = enabled;
+        config.set('features.autoReadMessages', enabled);
+        logger.info(`📖 Auto-read messages ${enabled ? 'enabled' : 'disabled'}`);
     }
 
     async shutdown() {
         logger.info('🛑 Shutting down HyperWa Userbot...');
         this.isShuttingDown = true;
 
-        // Save and cleanup store
-        this.store.saveToFile();
+        // Cleanup store
         this.store.cleanup();
 
         if (this.telegramBridge) {
@@ -497,36 +707,13 @@ class HyperWaBot {
         }
 
         if (this.sock) {
+
             await this.sock.end();
         }
 
         logger.info('✅ HyperWa Userbot shutdown complete');
     }
-
-    // Store-powered helper methods
-    getChatInfo(jid) {
-        return this.store.chats[jid] || null;
-    }
-
-    getContactInfo(jid) {
-        return this.store.contacts[jid] || null;
-    }
-
-    getChatMessages(jid, limit = 50) {
-        const messages = this.store.getMessages(jid);
-        return messages.slice(-limit).reverse();
-    }
-
-    getGroupInfo(jid) {
-        const metadata = this.store.groupMetadata[jid];
-        const chat = this.store.chats[jid];
-        return {
-            metadata,
-            chat,
-            participants: metadata?.participants || []
-        };
-    }
 }
 
+// Fixed: Exporting with ESM syntax
 export { HyperWaBot };
-export default HyperWaBot;
