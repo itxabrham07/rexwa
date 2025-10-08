@@ -1,5 +1,5 @@
 import axios from 'axios';
-import cheerio from 'cheerio';
+import * as cheerio from 'cheerio'; // FIX: Changed to namespace import
 
 class GoogleSearchModule {
     constructor(bot) {
@@ -88,7 +88,7 @@ class GoogleSearchModule {
                 }
             });
 
-            const $ = cheerio.load(response.data);
+            const $ = cheerio.load(response.data); // FIX: Uses cheerio.load
             const results = [];
 
             $('div.g').each((i, element) => {
@@ -145,7 +145,7 @@ class GoogleSearchModule {
                 }
             });
 
-            const $ = cheerio.load(response.data);
+            const $ = cheerio.load(response.data); // FIX: Uses cheerio.load
             const images = [];
 
             $('img').each((i, element) => {
@@ -202,7 +202,7 @@ class GoogleSearchModule {
                 }
             });
 
-            const $ = cheerio.load(response.data);
+            const $ = cheerio.load(response.data); // FIX: Uses cheerio.load
             const news = [];
 
             $('div.SoaBEf').each((i, element) => {
@@ -287,7 +287,7 @@ class GoogleSearchModule {
                 }
             });
 
-            const $ = cheerio.load(response.data);
+            const $ = cheerio.load(response.data); // FIX: Uses cheerio.load
             
             // Try to find definition in Google's dictionary box
             const definition = $('div[data-dobid="dfn"]').text() || 
@@ -313,8 +313,6 @@ class GoogleSearchModule {
             throw new Error(`Definition search failed: ${error.message}`);
         }
     }
-
-
 }
 
 export default GoogleSearchModule;
