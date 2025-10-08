@@ -6,9 +6,12 @@ import makeWASocket, {
     useMultiFileAuthState,
     getAggregateVotesInPollMessage,
     isJidNewsletter,
-    proto,
     delay
 } from '@whiskeysockets/baileys';
+
+import * as WA from '@whiskeysockets/baileys';
+const proto = WA.proto; 
+
 import qrcode from 'qrcode-terminal';
 import fs from 'fs-extra';
 import path from 'path';
