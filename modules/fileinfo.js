@@ -1,6 +1,6 @@
-const fs = require('fs-extra');
-const path = require('path');
-const { downloadContentFromMessage } = require('@whiskeysockets/baileys');
+import fs from 'fs-extra';
+import path from 'path';
+import { downloadContentFromMessage } from '@whiskeysockets/baileys';
 
 class FileInfoModule {
     constructor(bot) {
@@ -246,4 +246,4 @@ class FileInfoModule {
 
 }
 
-module.exports = FileInfoModule;
+export default FileInfoModule;

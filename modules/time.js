@@ -1,4 +1,4 @@
-const axios = require('axios');
+import axios from 'axios';
 
 /**
  * TimeModule: Displays the current local time and date for a specified city.
@@ -144,4 +144,4 @@ class TimeModule {
   }
 }
 
-module.exports = TimeModule;
+export default TimeModule;

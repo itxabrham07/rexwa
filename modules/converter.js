@@ -1,10 +1,10 @@
-const fs = require('fs-extra');
-const path = require('path');
-const { exec } = require('child_process');
-const { promisify } = require('util');
-const { downloadContentFromMessage } = require('@whiskeysockets/baileys');
-const axios = require('axios');
-const { Sticker, StickerTypes } = require('wa-sticker-formatter');
+import fs from 'fs-extra';
+import path from 'path';
+import { exec } from 'child_process';
+import { promisify } from 'util';
+import { downloadContentFromMessage } from '@whiskeysockets/baileys';
+import axios from 'axios';
+import { Sticker, StickerTypes } from 'wa-sticker-formatter';
 
 const execAsync = promisify(exec);
 
@@ -536,4 +536,4 @@ class ConverterModule {
     }
 }
 
-module.exports = ConverterModule;
+export default ConverterModule;

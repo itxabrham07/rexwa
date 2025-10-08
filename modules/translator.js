@@ -1,4 +1,4 @@
-const axios = require('axios');
+import axios from 'axios';
 
 /**
  * TranslateModule: A simple translator module using Google Translate API.
@@ -160,4 +160,4 @@ class TranslateModule {
   }
 }
 
-module.exports = TranslateModule;
+export default TranslateModule;

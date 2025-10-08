@@ -1,10 +1,9 @@
-
-const config = require('../config');
-const fs = require('fs-extra');
-const path = require('path');
-const { exec } = require('child_process');
-const helpers = require('../utils/helpers');
-const logger = require('../Core/logger');
+import config from '../config.js';
+import fs from 'fs-extra';
+import path from 'path';
+import { exec } from 'child_process';
+import helpers from '../utils/helpers.js';
+import logger from '../Core/logger.js';
 
 class CoreModule {
     constructor(bot) {
@@ -403,4 +402,4 @@ async runShell(msg, params, context) {
     }
 }
 
-module.exports = CoreModule;
+export default CoreModule;

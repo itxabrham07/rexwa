@@ -1,11 +1,11 @@
-const fs = require('fs');
-const path = require('path');
-const { tmpdir } = require('os');
-const { exec } = require('child_process');
-const { downloadMediaMessage } = require('@whiskeysockets/baileys');
-const helpers = require('../utils/helpers');
+import fs from 'fs';
+import path from 'path';
+import {  tmpdir  } from 'os';
+import {  exec  } from 'child_process';
+import {  downloadMediaMessage  } from '@whiskeysockets/baileys';
+import helpers from '../utils/helpers.js';
 
-module.exports = {
+export default {
    name: 'rvo',
    metadata: {
       description: 'Reveal view-once media (image/video/audio) by replying to it.',

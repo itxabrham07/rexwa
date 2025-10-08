@@ -1,5 +1,5 @@
-const axios = require('axios');
-const cheerio = require('cheerio');
+import axios from 'axios';
+import cheerio from 'cheerio';
 
 class GoogleSearchModule {
     constructor(bot) {
@@ -317,4 +317,4 @@ class GoogleSearchModule {
 
 }
 
-module.exports = GoogleSearchModule;
+export default GoogleSearchModule;
