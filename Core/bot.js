@@ -4,7 +4,6 @@ const {
     makeWASocket, 
     useMultiFileAuthState, 
     DisconnectReason, 
-    fetchLatestBaileysVersion, 
     makeCacheableSignalKeyStore, 
     getAggregateVotesInPollMessage, 
     isJidNewsletter, 
@@ -168,8 +167,8 @@ class HyperWaBot {
             ({ state, saveCreds } = await useMultiFileAuthState(this.authPath));
         }
 
-        const { version, isLatest } = await fetchLatestBaileysVersion();
-        logger.info(`📱 Using WA v${version.join('.')}, isLatest: ${isLatest}`);
+        const { version, isLatest } = await Baileys.fetchLatestBaileysVersion();
+    logger.info(`📱 Using WA v${version.join('.')}, isLatest: ${isLatest}`);
 
         try {
             this.sock = makeWASocket({
