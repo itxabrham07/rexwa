@@ -1,18 +1,22 @@
-const TelegramBot = require('node-telegram-bot-api');
-const TelegramCommands = require('./commands');
-const config = require('../config');
-const logger = require('../Core/logger');
-const { connectDb } = require('../utils/db');
-const fs = require('fs-extra');
-const path = require('path');
-const axios = require('axios');
-const sharp = require('sharp');
-const mime = require('mime-types');
-const { downloadContentFromMessage } = require('@whiskeysockets/baileys');
-const ffmpeg = require('fluent-ffmpeg');
-const { Sticker, StickerTypes } = require('wa-sticker-formatter');
-const { exec } = require('child_process');
-const qrcode = require('qrcode');
+import TelegramBot from 'node-telegram-bot-api';
+import TelegramCommands from './commands.js';
+import config from '../config.js';
+import logger from '../Core/logger.js';
+import { connectDb } from '../utils/db.js';
+import fs from 'fs-extra';
+import path from 'path';
+import axios from 'axios';
+import sharp from 'sharp';
+import mime from 'mime-types';
+import { downloadContentFromMessage } from '@whiskeysockets/baileys';
+import ffmpeg from 'fluent-ffmpeg';
+import { Sticker, StickerTypes } from 'wa-sticker-formatter';
+import { exec } from 'child_process';
+import qrcode from 'qrcode';
+import { fileURLToPath } from 'url';
+
+const __filename = fileURLToPath(import.meta.url);
+const __dirname = path.dirname(__filename);
 
 
 class TelegramBridge {
@@ -2121,4 +2125,4 @@ async handleWhatsAppContact(whatsappMsg, topicId, isOutgoing = false) {
     }
 }
 
-module.exports = TelegramBridge;
+export default TelegramBridge;

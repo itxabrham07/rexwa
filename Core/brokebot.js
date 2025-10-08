@@ -1,17 +1,17 @@
-const { default: makeWASocket, useMultiFileAuthState, DisconnectReason, fetchLatestBaileysVersion, makeCacheableSignalKeyStore, getAggregateVotesInPollMessage, isJidNewsletter, delay, proto } = require('@whiskeysockets/baileys');
-const { Boom } = require('@hapi/boom');
-const qrcode = require('qrcode-terminal');
-const fs = require('fs-extra');
-const path = require('path');
-const NodeCache = require('node-cache');
+import makeWASocket, { useMultiFileAuthState, DisconnectReason, fetchLatestBaileysVersion, makeCacheableSignalKeyStore, getAggregateVotesInPollMessage, isJidNewsletter, delay, proto } from '@whiskeysockets/baileys';
+import { Boom } from '@hapi/boom';
+import qrcode from 'qrcode-terminal';
+import fs from 'fs-extra';
+import path from 'path';
+import NodeCache from 'node-cache';
 
-const config = require('../config');
-const logger = require('./logger');
-const MessageHandler = require('./message-handler');
-const { connectDb } = require('../utils/db');
-const ModuleLoader = require('./module-loader');
-const { useMongoAuthState } = require('../utils/mongoAuthState');
-const { makeInMemoryStore } = require('./store');
+import config from '../config.js';
+import logger from './logger.js';
+import MessageHandler from './message-handler.js';
+import { connectDb } from '../utils/db.js';
+import ModuleLoader from './module-loader.js';
+import { useMongoAuthState } from '../utils/mongoAuthState.js';
+import { makeInMemoryStore } from './store.js';
 const msgRetryCounterCache = new NodeCache();
 
 class HyperWaBot {
@@ -410,4 +410,4 @@ class HyperWaBot {
     }
 }
 
-module.exports = { HyperWaBot };
+export { HyperWaBot };

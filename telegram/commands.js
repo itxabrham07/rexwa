@@ -1,4 +1,4 @@
-const logger = require('../Core/logger');
+import logger from '../Core/logger.js';
 
 class TelegramCommands {
     constructor(bridge) {
@@ -195,4 +195,4 @@ class TelegramCommands {
     }
 }
 
-module.exports = TelegramCommands;
+export default TelegramCommands;

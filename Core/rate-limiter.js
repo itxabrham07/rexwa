@@ -58,4 +58,4 @@ class RateLimiter {
     }
 }
 
-module.exports = new RateLimiter();
+export default new RateLimiter();
