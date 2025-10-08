@@ -1,13 +1,17 @@
 import { Boom } from '@hapi/boom';
-import makeWASocket, { 
-    DisconnectReason, 
-    fetchLatestBaileysVersion, 
-    makeCacheableSignalKeyStore, 
+import makeWASocket, {
+    DisconnectReason,
+    fetchLatestBaileysVersion,
+    makeCacheableSignalKeyStore,
     useMultiFileAuthState,
+    getAggregateVotesInPollMessage,
+    isJidNewsletter,
     delay
 } from '@whiskeysockets/baileys';
-// Import 'proto' from the correct submodule path
-import * as proto from '@whiskeysockets/baileys/lib/WAProto.js'; 
+
+import * as WA from '@whiskeysockets/baileys';
+const proto = WA.proto; 
+
 import qrcode from 'qrcode-terminal';
 import fs from 'fs-extra';
 import NodeCache from 'node-cache';
