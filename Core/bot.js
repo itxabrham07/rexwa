@@ -4,9 +4,10 @@ import makeWASocket, {
     fetchLatestBaileysVersion, 
     makeCacheableSignalKeyStore, 
     useMultiFileAuthState,
-    proto,
     delay
 } from '@whiskeysockets/baileys';
+// Import 'proto' from the correct submodule path
+import * as proto from '@whiskeysockets/baileys/lib/WAProto.js'; 
 import qrcode from 'qrcode-terminal';
 import fs from 'fs-extra';
 import NodeCache from 'node-cache';
