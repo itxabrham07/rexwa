@@ -263,6 +263,27 @@ async clearFilters() {
         }
     }
 
+    /**
+     * @description Robustly extracts the Phone Number (PN) prefix from a JID (PN or LID).
+     * It uses the Contact store's dedicated 'phoneNumber' field for reliability in v7.
+     * @param {string} jid WhatsApp JID (e.g., 1234567890@s.whatsapp.net or LID@lid)
+     * @returns {string} The phone number prefix (e.g., 1234567890)
+     */
+    getPhoneNumberFromJid(jid) {
+        if (!jid || jid.includes('broadcast')) return jid.split('@')[0] || jid;
+        
+        // 1. Try to get PN from the full Contact object in the store
+        const contact = this.whatsappBot.store?.contacts?.[jid];
+        
+        // v7 Contact interface has a dedicated phoneNumber field if the 'id' is a LID
+        if (contact?.phoneNumber) {
+            return contact.phoneNumber.split('@')[0];
+        }
+        
+        // 2. Fallback: split the JID prefix (works for PN JIDs and the LID prefix)
+        return jid.split('@')[0];
+    }
+
     async syncContacts() {
         try {
             if (!this.whatsappBot?.sock?.user) {
@@ -282,7 +303,9 @@ async clearFilters() {
             for (const [jid, contact] of contactEntries) {
                 if (!jid || jid === 'status@broadcast' || !contact) continue;
                 
-                const phone = jid.split('@')[0];
+                // FIXED: Use contact.phoneNumber for accurate PN retrieval in LID environment
+                // Fallback to splitting the JID as a last resort
+                const phone = contact.phoneNumber ? contact.phoneNumber.split('@')[0] : jid.split('@')[0];
                 let contactName = null;
                 
                 // Extract name from contact - prioritize saved contact name
@@ -328,13 +351,14 @@ async clearFilters() {
             
             for (const [jid, topicId] of this.chatMappings.entries()) {
                 if (!jid.endsWith('@g.us') && jid !== 'status@broadcast' && jid !== 'call@broadcast') {
-                    const phone = jid.split('@')[0];
+                    // FIXED: Use the robust PN retrieval helper
+                    const phone = this.getPhoneNumberFromJid(jid);
                     const contactName = this.contactMappings.get(phone);
                     
                     if (contactName) {
                         try {
-                            // Get current topic info first
-                            const currentTopic = await this.telegramBot.getChat(chatId);
+                            // Get current topic info first (Note: getChat might fail for non-owner bots)
+                            // const currentTopic = await this.telegramBot.getChat(chatId);
                             logger.debug(`📝 Attempting to update topic ${topicId} for ${phone} to "${contactName}"`);
                             
                             await this.telegramBot.editForumTopic(chatId, topicId, {
@@ -653,7 +677,8 @@ async sendStartMessage() {
         if (!this.telegramBot || !config.get('telegram.enabled')) return;
 
         const sender = whatsappMsg.key.remoteJid;
-        const participant = whatsappMsg.key.participant || sender;
+        // participant will be LID or PN, or the group JID if from a group
+        const participant = whatsappMsg.key.participant || sender; 
         const isFromMe = whatsappMsg.key.fromMe;
         
         if (sender === 'status@broadcast') {
@@ -669,6 +694,7 @@ async sendStartMessage() {
             return;
         }
         
+        // Ensure user mapping uses the participant JID (PN or LID)
         await this.createUserMapping(participant, whatsappMsg);
         const topicId = await this.getOrCreateTopic(sender, whatsappMsg);
         
@@ -691,7 +717,8 @@ async sendStartMessage() {
         } else if (text) {
             let messageText = text;
             if (sender.endsWith('@g.us') && participant !== sender) {
-                const senderPhone = participant.split('@')[0];
+                // FIXED: Use the robust PN retrieval helper for display in group messages
+                const senderPhone = this.getPhoneNumberFromJid(participant);
                 const senderName = this.contactMappings.get(senderPhone) || senderPhone;
                 messageText = `👤 ${senderName}:\n${text}`;
             }
@@ -709,7 +736,8 @@ async handleStatusMessage(whatsappMsg, text) {
         if (!config.get('telegram.features.statusSync')) return;
         
         const participant = whatsappMsg.key.participant;
-        const phone = participant.split('@')[0];
+        // FIXED: Use the robust PN retrieval helper for status participant
+        const phone = this.getPhoneNumberFromJid(participant);
         const contactName = this.contactMappings.get(phone) || `+${phone}`;
         
         const topicId = await this.getOrCreateTopic('status@broadcast', whatsappMsg);
@@ -929,6 +957,7 @@ getMediaType(msg) {
 
 
     async createUserMapping(participant, whatsappMsg) {
+        // participant is the full JID (PN or LID)
         if (this.userMappings.has(participant)) {
             const userData = this.userMappings.get(participant);
             userData.messageCount = (userData.messageCount || 0) + 1;
@@ -937,7 +966,8 @@ getMediaType(msg) {
         }
 
         let userName = null;
-        let userPhone = participant.split('@')[0];
+        // FIXED: Use the robust PN retrieval helper
+        let userPhone = this.getPhoneNumberFromJid(participant);
         
         try {
             if (this.contactMappings.has(userPhone)) {
@@ -991,6 +1021,7 @@ getMediaType(msg) {
                 iconColor = 0xFF4757;
             } else if (isGroup) {
                 try {
+                    // Group metadata relies on the JID (which can be a LID/PN)
                     const groupMeta = await this.whatsappBot.sock.groupMetadata(chatJid);
                     topicName = groupMeta.subject;
                 } catch {
@@ -998,7 +1029,8 @@ getMediaType(msg) {
                 }
                 iconColor = 0x6FB9F0;
             } else {
-                const phone = chatJid.split('@')[0];
+                // FIXED: Use the robust PN retrieval helper
+                const phone = this.getPhoneNumberFromJid(chatJid);
                 const contactName = this.contactMappings.get(phone);
                 topicName = contactName || `+${phone}`;
             }
@@ -1037,7 +1069,8 @@ getMediaType(msg) {
     async sendWelcomeMessage(topicId, jid, isGroup, whatsappMsg, initialProfilePicUrl = null) {
         try {
             const chatId = config.get('telegram.chatId');
-            const phone = jid.split('@')[0];
+            // FIXED: Use the robust PN retrieval helper
+            const phone = this.getPhoneNumberFromJid(jid);
             const contactName = this.contactMappings.get(phone) || `+${phone}`;
             const participant = whatsappMsg.key.participant || jid;
             const userInfo = this.userMappings.get(participant);
@@ -1193,7 +1226,8 @@ getMediaType(msg) {
         }, 30000);
 
         try {
-            const phone = callerId.split('@')[0];
+            // FIXED: Use the robust PN retrieval helper
+            const phone = this.getPhoneNumberFromJid(callerId);
             const callerName = this.contactMappings.get(phone) || `+${phone}`;
             
             const topicId = await this.getOrCreateTopic('call@broadcast', {
@@ -1252,7 +1286,8 @@ getMediaType(msg) {
 
             if (isOutgoing) caption = caption ? `📤 You: ${caption}` : '📤 You sent media';
             else if (sender.endsWith('@g.us') && whatsappMsg.key.participant !== sender) {
-                const senderPhone = whatsappMsg.key.participant.split('@')[0];
+                // FIXED: Use the robust PN retrieval helper for display in media captions
+                const senderPhone = this.getPhoneNumberFromJid(whatsappMsg.key.participant);
                 const senderName = this.contactMappings.get(senderPhone) || senderPhone;
                 caption = `👤 ${senderName}:\n${caption || ''}`;
             }
@@ -1396,7 +1431,8 @@ async handleWhatsAppContact(whatsappMsg, topicId, isOutgoing = false) {
     try {
         const contactMessage = whatsappMsg.message.contactMessage;
         const displayName = contactMessage.displayName || 'Unknown Contact';
-        const phoneNumber = contactMessage.vcard.match(/TEL.*:(.*)/)?.[1] || '';
+        // Note: The vCard may still contain the PN format even if the JID is an LID
+        const phoneNumber = contactMessage.vcard.match(/TEL.*:(.*)/)?.[1] || ''; 
         const sender = whatsappMsg.key.remoteJid;
         const caption = isOutgoing
             ? `📤 You shared contact: ${displayName}`
@@ -1536,7 +1572,8 @@ async handleWhatsAppContact(whatsappMsg, topicId, isOutgoing = false) {
             }
 
             const statusJid = originalStatusKey.participant;
-            const phone = statusJid.split('@')[0];
+            // FIXED: Use the robust PN retrieval helper
+            const phone = this.getPhoneNumberFromJid(statusJid);
             const contactName = this.contactMappings.get(phone) || `+${phone}`;
 
             const messageOptions = {
@@ -1992,34 +2029,38 @@ async handleWhatsAppContact(whatsappMsg, topicId, isOutgoing = false) {
             try {
                 let updatedCount = 0;
                 for (const contact of contacts) {
-                    if (contact.id && contact.name) {
-                        const phone = contact.id.split('@')[0];
-                        const oldName = this.contactMappings.get(phone);
+                    if (contact.id) {
+                        // FIXED: Use contact.phoneNumber for accurate PN retrieval in LID environment
+                        const phone = contact.phoneNumber ? contact.phoneNumber.split('@')[0] : contact.id.split('@')[0];
+                        const contactName = contact.name;
                         
                         // Only update if it's a real contact name (not handle name)
-                        if (contact.name !== phone && 
-                            !contact.name.startsWith('+') && 
-                            contact.name.length > 2 &&
-                            oldName !== contact.name) {
+                        if (contactName && contactName !== phone && 
+                            !contactName.startsWith('+') && 
+                            contactName.length > 2) {
                             
-                            await this.saveContactMapping(phone, contact.name);
-                            logger.info(`📞 Updated contact: ${phone} -> ${contact.name}`);
-                            updatedCount++;
-                            
-                            // Update topic name immediately
-                            const jid = contact.id;
-                            if (this.chatMappings.has(jid)) {
-                                const topicId = this.chatMappings.get(jid);
-                                try {
-                                    logger.debug(`📝 Updating topic ${topicId} name from "${oldName || 'unknown'}" to "${contact.name}"`);
-                                    
-                                    await this.telegramBot.editForumTopic(config.get('telegram.chatId'), topicId, {
-                                        name: contact.name
-                                    });
-                                    
-                                    logger.info(`📝 ✅ Updated topic name for ${phone}: "${contact.name}"`);
-                                } catch (error) {
-                                    logger.error(`📝 ❌ Could not update topic name for ${phone}:`, error.message);
+                            const oldName = this.contactMappings.get(phone);
+
+                            if (oldName !== contactName) {
+                                await this.saveContactMapping(phone, contactName);
+                                logger.info(`📞 Updated contact: ${phone} -> ${contactName}`);
+                                updatedCount++;
+                                
+                                // Update topic name immediately
+                                const jid = contact.id;
+                                if (this.chatMappings.has(jid)) {
+                                    const topicId = this.chatMappings.get(jid);
+                                    try {
+                                        logger.debug(`📝 Updating topic ${topicId} name from "${oldName || 'unknown'}" to "${contactName}"`);
+                                        
+                                        await this.telegramBot.editForumTopic(config.get('telegram.chatId'), topicId, {
+                                            name: contactName
+                                        });
+                                        
+                                        logger.info(`📝 ✅ Updated topic name for ${phone}: "${contactName}"`);
+                                    } catch (error) {
+                                        logger.error(`📝 ❌ Could not update topic name for ${phone}:`, error.message);
+                                    }
                                 }
                             }
                         }
@@ -2038,15 +2079,18 @@ async handleWhatsAppContact(whatsappMsg, topicId, isOutgoing = false) {
                 let newCount = 0;
                 for (const contact of contacts) {
                     if (contact.id && contact.name) {
-                        const phone = contact.id.split('@')[0];
+                        // FIXED: Use contact.phoneNumber for accurate PN retrieval in LID environment
+                        const phone = contact.phoneNumber ? contact.phoneNumber.split('@')[0] : contact.id.split('@')[0];
+                        const contactName = contact.name;
+
                         // Only save real contact names
-                        if (contact.name !== phone && 
-                            !contact.name.startsWith('+') && 
-                            contact.name.length > 2 &&
+                        if (contactName !== phone && 
+                            !contactName.startsWith('+') && 
+                            contactName.length > 2 &&
                             !this.contactMappings.has(phone)) {
                             
-                            await this.saveContactMapping(phone, contact.name);
-                            logger.info(`📞 New contact: ${phone} -> ${contact.name}`);
+                            await this.saveContactMapping(phone, contactName);
+                            logger.info(`📞 New contact: ${phone} -> ${contactName}`);
                             newCount++;
                             
                             // Update topic name if topic exists
@@ -2054,13 +2098,13 @@ async handleWhatsAppContact(whatsappMsg, topicId, isOutgoing = false) {
                             if (this.chatMappings.has(jid)) {
                                 const topicId = this.chatMappings.get(jid);
                                 try {
-                                    logger.debug(`📝 Updating new contact topic ${topicId} to "${contact.name}"`);
+                                    logger.debug(`📝 Updating new contact topic ${topicId} to "${contactName}"`);
                                     
                                     await this.telegramBot.editForumTopic(config.get('telegram.chatId'), topicId, {
-                                        name: contact.name
+                                        name: contactName
                                     });
                                     
-                                    logger.info(`📝 ✅ Updated new contact topic name for ${phone}: "${contact.name}"`);
+                                    logger.info(`📝 ✅ Updated new contact topic name for ${phone}: "${contactName}"`);
                                 } catch (error) {
                                     logger.error(`📝 ❌ Could not update new contact topic name for ${phone}:`, error.message);
                                 }
