@@ -1,5 +1,6 @@
 import fs from 'fs-extra';
 import path from 'path';
+import { fileURLToPath } from 'url'; // ADDED: Required for ES Module __dirname equivalent
 import { exec } from 'child_process';
 import { promisify } from 'util';
 import { downloadContentFromMessage } from '@whiskeysockets/baileys';
@@ -19,6 +20,9 @@ class ConverterModule {
             category: 'utility'
         };
 
+        // FIX: Replaced CommonJS __dirname with ES Module method
+        const __filename = fileURLToPath(import.meta.url);
+        const __dirname = path.dirname(__filename);
         this.tempDir = path.join(__dirname, '../temp');
         this.ensureTempDir();
 
