@@ -12,10 +12,8 @@ import qrcode from 'qrcode-terminal';
 import fs from 'fs-extra';
 import path from 'path';
 import NodeCache from 'node-cache';
-
-// NOTE: File extensions MUST be added for local imports in ESM.
-import { makeInMemoryStore } from './store.js'; // Adjusted path for ESM
-import config from '../config/index.js'; // Assuming config is an ESM export
+import { makeInMemoryStore } from './store.js'; 
+import config from '../config.js';
 import logger from './logger.js';
 import MessageHandler from './message-handler.js';
 import { connectDb } from '../utils/db.js';
