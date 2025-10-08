@@ -1,28 +1,31 @@
 import { Boom } from '@hapi/boom';
-import makeWASocket, {
-    DisconnectReason,
-    fetchLatestBaileysVersion,
-    makeCacheableSignalKeyStore,
+import makeWASocket, { 
+    DisconnectReason, 
+    fetchLatestBaileysVersion, 
+    makeCacheableSignalKeyStore, 
     useMultiFileAuthState,
-    getAggregateVotesInPollMessage,
-    isJidNewsletter,
+    proto,
     delay
 } from '@whiskeysockets/baileys';
-
-import * as WA from '@whiskeysockets/baileys';
-const proto = WA.proto; 
-
 import qrcode from 'qrcode-terminal';
 import fs from 'fs-extra';
-import path from 'path';
-import NodeCache from '@cacheable/node-cache';
+import NodeCache from 'node-cache';
+import P from 'pino';
 import { makeInMemoryStore } from './store.js';
 import config from '../config.js';
-import logger from './logger.js';
 import MessageHandler from './message-handler.js';
 import { connectDb } from '../utils/db.js';
 import ModuleLoader from './module-loader.js';
-import { useMongoAuthState } from '../utils/mongoAuthState.js';
+import { useMongoAuthState, clearMongoAuthState } from '../utils/mongoAuthState.js';
+
+// Initialize logger
+const logger = P({
+    level: config.get('log.level', 'info'),
+    transport: config.get('log.pretty', false) ? {
+        target: 'pino-pretty',
+        options: { colorize: true }
+    } : undefined
+});
 
 class HyperWaBot {
     constructor() {
@@ -35,27 +38,35 @@ class HyperWaBot {
         this.moduleLoader = new ModuleLoader(this);
         this.qrCodeSent = false;
         this.useMongoAuth = config.get('auth.useMongoAuth', false);
-
+        
+        // Initialize the enhanced store
         this.store = makeInMemoryStore({
             logger: logger.child({ module: 'store' }),
             filePath: config.get('store.filePath', './whatsapp-store.json'),
             autoSaveInterval: config.get('store.autoSaveInterval', 30000)
         });
 
+        // Load existing store data on startup
         this.store.loadFromFile();
-
+        
+        // Message retry cache (prevents decryption loops)
         this.msgRetryCounterCache = new NodeCache({
             stdTTL: 300,
             maxKeys: 500
         });
+        
+        // On-demand history sync tracking
         this.onDemandMap = new Map();
-
+        
+        // Memory cleanup for on-demand map
         setInterval(() => {
             if (this.onDemandMap.size > 100) {
+                logger.debug('🧹 Clearing on-demand history map');
                 this.onDemandMap.clear();
             }
-        }, 300000);
+        }, 300000); // Every 5 minutes
 
+        // Store event listeners
         this.setupStoreEventListeners();
     }
 
@@ -72,18 +83,19 @@ class HyperWaBot {
             logger.debug(`💬 Store: ${chats.length} chats cached`);
         });
 
+        // Log store statistics periodically
         setInterval(() => {
             const stats = this.getStoreStats();
             logger.info(`📊 Store Stats - Chats: ${stats.chats}, Contacts: ${stats.contacts}, Messages: ${stats.messages}`);
-        }, 300000);
+        }, 300000); // Every 5 minutes
     }
 
     getStoreStats() {
-        const chatCount = Object.keys(this.store.chats).length;
-        const contactCount = Object.keys(this.store.contacts).length;
-        const messageCount = Object.values(this.store.messages)
+        const chatCount = Object.keys(this.store.chats || {}).length;
+        const contactCount = Object.keys(this.store.contacts || {}).length;
+        const messageCount = Object.values(this.store.messages || {})
             .reduce((total, chatMessages) => total + Object.keys(chatMessages).length, 0);
-
+        
         return {
             chats: chatCount,
             contacts: contactCount,
@@ -92,7 +104,7 @@ class HyperWaBot {
     }
 
     async initialize() {
-        logger.info('🔧 Initializing HyperWa Userbot v3.0 with Baileys 7.x...');
+        logger.info('🔧 Initializing HyperWa Userbot...');
 
         try {
             this.db = await connectDb();
@@ -102,6 +114,7 @@ class HyperWaBot {
             process.exit(1);
         }
 
+        // Initialize Telegram bridge if enabled
         if (config.get('telegram.enabled')) {
             try {
                 const { default: TelegramBridge } = await import('../telegram/bridge.js');
@@ -123,204 +136,83 @@ class HyperWaBot {
         await this.moduleLoader.loadModules();
         await this.startWhatsApp();
 
-        logger.info('✅ HyperWa Userbot v3.0 initialized successfully!');
+        logger.info('✅ HyperWa Userbot initialized successfully!');
     }
 
- async startWhatsApp() {
-    let state, saveCreds;
+    async startWhatsApp() {
+        let state, saveCreds;
 
-    if (this.sock) {
-        logger.info('🧹 Cleaning up existing WhatsApp socket');
-        this.sock.ev.removeAllListeners();
-        await this.sock.end();
-        this.sock = null;
-    }
-
-    // Choose auth method based on configuration
-    if (this.useMongoAuth) {
-        logger.info('🔧 Using MongoDB auth state...');
-        try {
-            ({ state, saveCreds } = await useMongoAuthState());
-            
-            // CRITICAL: Validate MongoDB auth state
-            if (!state || !state.creds || !state.keys) {
-                logger.warn('⚠️ MongoDB auth state is incomplete or empty!');
-                logger.info('📋 State validation:', {
-                    hasState: !!state,
-                    hasCreds: !!state?.creds,
-                    hasKeys: !!state?.keys,
-                    credsRegistrationId: state?.creds?.registrationId,
-                    keysCount: state?.keys ? Object.keys(state.keys).length : 0
-                });
-                
-                // If MongoDB state is invalid, clear it and use file-based
-                logger.warn('🗑️ Clearing invalid MongoDB session...');
-                try {
-                    const db = await connectDb();
-                    await db.collection("auth").deleteOne({ _id: "session" });
-                    logger.info('✅ Invalid MongoDB session cleared');
-                } catch (cleanError) {
-                    logger.error('❌ Failed to clear MongoDB session:', cleanError);
-                }
-                
-                logger.info('🔄 Switching to file-based auth to generate new session...');
-                ({ state, saveCreds } = await useMultiFileAuthState(this.authPath));
-                this.useMongoAuth = false; // Temporarily disable until new session is created
-            } else {
-                logger.info('✅ MongoDB auth state validated successfully');
-            }
-        } catch (error) {
-            logger.error('❌ Failed to initialize MongoDB auth state:', error);
-            logger.info('🔄 Falling back to file-based auth...');
-            ({ state, saveCreds } = await useMultiFileAuthState(this.authPath));
-            this.useMongoAuth = false;
-        }
-    } else {
-        logger.info('🔧 Using file-based auth state...');
-        ({ state, saveCreds } = await useMultiFileAuthState(this.authPath));
-    }
-
-    // Final validation before creating socket
-    if (!state?.creds?.registrationId) {
-        logger.error('❌ Auth state is invalid - missing registration ID');
-        logger.info('🔄 This appears to be a fresh session, will generate QR code...');
-    }
-
-    const { version, isLatest } = await fetchLatestBaileysVersion();
-    logger.info(`📱 Using WA v${version.join('.')}, isLatest: ${isLatest}`);
-
-    try {
-        // Wrap socket creation in detailed try-catch
-        logger.info('🔨 Creating WhatsApp socket...');
-        
-        this.sock = makeWASocket({
-            auth: {
-                creds: state.creds,
-                keys: makeCacheableSignalKeyStore(state.keys, logger.child({ module: 'signal-keys' })),
-            },
-            version,
-            printQRInTerminal: false,
-            logger: logger.child({ module: 'baileys' }),
-            msgRetryCounterCache: this.msgRetryCounterCache,
-            generateHighQualityLinkPreview: true,
-            getMessage: this.getMessage.bind(this),
-            browser: ['HyperWa', 'Chrome', '3.0'],
-            syncFullHistory: false,
-            markOnlineOnConnect: true,
-            firewall: false
-        });
-
-        logger.info('✅ WhatsApp socket created successfully');
-
-        // Bind store to socket events
-        this.store.bind(this.sock.ev);
-        logger.info('🔗 Store bound to WhatsApp socket events');
-
-        // Setup event handlers BEFORE waiting for connection
-        this.setupEnhancedEventHandlers(saveCreds);
-
-        // Wait for connection with better promise handling
-        const connectionPromise = new Promise((resolve, reject) => {
-            let isResolved = false;
-            
-            const connectionTimeout = setTimeout(() => {
-                if (!isResolved && !this.sock.user) {
-                    isResolved = true;
-                    logger.warn('⏱️ QR code scan timed out after 30 seconds');
-                    reject(new Error('QR code scan timed out'));
-                }
-            }, 30000);
-
-            this.sock.ev.on('connection.update', update => {
-                if (isResolved) return;
-                
-                if (update.connection === 'open') {
-                    isResolved = true;
-                    clearTimeout(connectionTimeout);
-                    logger.info('✅ Connection established successfully');
-                    resolve();
-                } else if (update.connection === 'close') {
-                    const statusCode = update.lastDisconnect?.error?.output?.statusCode;
-                    if (statusCode === DisconnectReason.loggedOut) {
-                        isResolved = true;
-                        clearTimeout(connectionTimeout);
-                        reject(new Error('Logged out - please scan QR code again'));
-                    }
-                    // Let handleConnectionUpdate manage other close scenarios
-                }
-            });
-        });
-
-        logger.info('⏳ Waiting for WhatsApp connection...');
-        await connectionPromise;
-        
-    } catch (error) {
-        // Enhanced error logging with type checking
-        logger.error('❌ Failed to initialize WhatsApp socket');
-        
-        // Log error details safely
-        if (error) {
-            logger.error('Error type:', typeof error);
-            logger.error('Error name:', error.name || 'Unknown');
-            logger.error('Error message:', error.message || 'No message');
-            logger.error('Error stack:', error.stack || 'No stack trace');
-            
-            // Check if it's a Boom error
-            if (error.isBoom) {
-                logger.error('Boom error output:', error.output);
-            }
-            
-            // Log the entire error object structure
-            try {
-                logger.error('Full error object:', JSON.stringify(error, Object.getOwnPropertyNames(error), 2));
-            } catch (jsonError) {
-                logger.error('Could not stringify error:', jsonError.message);
-            }
-        } else {
-            logger.error('Error is null or undefined');
-        }
-        
-        // Log auth state for debugging
-        logger.error('Auth state debug:', {
-            hasCreds: !!state?.creds,
-            hasKeys: !!state?.keys,
-            hasRegistrationId: !!state?.creds?.registrationId,
-            credsKeys: state?.creds ? Object.keys(state.creds).slice(0, 10) : [],
-            keysCount: state?.keys ? Object.keys(state.keys).length : 0
-        });
-        
-        // Clean up before retry
+        // Clean up existing socket if present
         if (this.sock) {
-            try {
-                logger.info('🧹 Cleaning up failed socket...');
-                this.sock.ev.removeAllListeners();
-                await this.sock.end();
-            } catch (cleanupError) {
-                logger.warn('⚠️ Cleanup error:', cleanupError.message);
-            }
+            logger.info('🧹 Cleaning up existing WhatsApp socket');
+            this.sock.ev.removeAllListeners();
+            await this.sock.end();
             this.sock = null;
         }
-        
-        // If this was a MongoDB auth failure, switch to file-based for next attempt
-        if (this.useMongoAuth && (!state?.creds?.registrationId)) {
-            logger.warn('🔄 Switching to file-based auth due to invalid MongoDB state');
-            this.useMongoAuth = false;
+
+        // Choose auth method based on configuration
+        if (this.useMongoAuth) {
+            logger.info('🔧 Using MongoDB auth state...');
+            try {
+                ({ state, saveCreds } = await useMongoAuthState());
+            } catch (error) {
+                logger.error('❌ Failed to initialize MongoDB auth state:', error);
+                logger.info('🔄 Falling back to file-based auth...');
+                ({ state, saveCreds } = await useMultiFileAuthState(this.authPath));
+            }
+        } else {
+            logger.info('🔧 Using file-based auth state...');
+            ({ state, saveCreds } = await useMultiFileAuthState(this.authPath));
         }
-        
-        logger.info('🔄 Retrying with new QR code in 5 seconds...');
-        setTimeout(() => this.startWhatsApp(), 5000);
+
+        const { version, isLatest } = await fetchLatestBaileysVersion();
+        logger.info(`📱 Using WA v${version.join('.')}, isLatest: ${isLatest}`);
+
+        try {
+            this.sock = makeWASocket({
+                auth: {
+                    creds: state.creds,
+                    keys: makeCacheableSignalKeyStore(state.keys, logger.child({ module: 'signal-keys' })),
+                },
+                version,
+                printQRInTerminal: false,
+                logger: logger.child({ module: 'baileys' }),
+                msgRetryCounterCache: this.msgRetryCounterCache,
+                generateHighQualityLinkPreview: true,
+                getMessage: this.getMessage.bind(this),
+                browser: ['HyperWa', 'Chrome', '3.0'],
+                syncFullHistory: false,
+                markOnlineOnConnect: true,
+                firewall: false
+            });
+
+            // CRITICAL: Bind store to socket events
+            this.store.bind(this.sock.ev);
+            logger.info('🔗 Store bound to WhatsApp socket events');
+
+            this.setupEnhancedEventHandlers(saveCreds);
+        } catch (error) {
+            logger.error('❌ Failed to initialize WhatsApp socket:', error);
+            logger.info('🔄 Retrying in 5 seconds...');
+            setTimeout(() => this.startWhatsApp(), 5000);
+        }
     }
-}
+
+    /**
+     * Enhanced getMessage with store lookup
+     * Returns message content for decryption/verification
+     */
     async getMessage(key) {
         try {
             if (key?.remoteJid && key?.id) {
                 const storedMessage = this.store.loadMessage(key.remoteJid, key.id);
                 if (storedMessage) {
                     logger.debug(`📨 Retrieved message from store: ${key.id}`);
-                    return storedMessage;
+                    return storedMessage.message;
                 }
             }
-
+            
+            // Return undefined to let Baileys handle missing messages
             return undefined;
         } catch (error) {
             logger.warn('⚠️ Error retrieving message:', error.message);
@@ -328,192 +220,95 @@ class HyperWaBot {
         }
     }
 
-    getChatInfo(jid) {
-        return this.store.chats[jid] || null;
-    }
-
-    getContactInfo(jid) {
-        return this.store.contacts[jid] || null;
-    }
-
-    getChatMessages(jid, limit = 50) {
-        const messages = this.store.getMessages(jid);
-        return messages.slice(-limit).reverse();
-    }
-
-    searchMessages(query, jid = null) {
-        const results = [];
-        const chatsToSearch = jid ? [jid] : Object.keys(this.store.messages);
-
-        for (const chatId of chatsToSearch) {
-            const messages = this.store.getMessages(chatId);
-            for (const msg of messages) {
-                const text = msg.message?.conversation ||
-                           msg.message?.extendedTextMessage?.text || '';
-                if (text.toLowerCase().includes(query.toLowerCase())) {
-                    results.push({
-                        chatId,
-                        message: msg,
-                        text
-                    });
-                }
-            }
-        }
-
-        return results.slice(0, 100);
-    }
-
-    getGroupInfo(jid) {
-        const metadata = this.store.groupMetadata[jid];
-        const chat = this.store.chats[jid];
-        return {
-            metadata,
-            chat,
-            participants: metadata?.participants || []
-        };
-    }
-
-    getUserStats(jid) {
-        let messageCount = 0;
-        let lastMessageTime = null;
-
-        for (const chatId of Object.keys(this.store.messages)) {
-            const messages = this.store.getMessages(chatId);
-            const userMessages = messages.filter(msg =>
-                msg.key?.participant === jid || msg.key?.remoteJid === jid
-            );
-
-            messageCount += userMessages.length;
-
-            if (userMessages.length > 0) {
-                const lastMsg = userMessages[userMessages.length - 1];
-                const msgTime = lastMsg.messageTimestamp * 1000;
-                if (!lastMessageTime || msgTime > lastMessageTime) {
-                    lastMessageTime = msgTime;
-                }
-            }
-        }
-
-        return {
-            messageCount,
-            lastMessageTime: lastMessageTime ? new Date(lastMessageTime) : null,
-            isActive: lastMessageTime && (Date.now() - lastMessageTime) < (7 * 24 * 60 * 60 * 1000)
-        };
-    }
-
-    async exportChatHistory(jid, format = 'json') {
-        const chat = this.getChatInfo(jid);
-        const messages = this.getChatMessages(jid, 1000);
-        const contact = this.getContactInfo(jid);
-
-        const exportData = {
-            chat,
-            contact,
-            messages,
-            exportedAt: new Date().toISOString(),
-            totalMessages: messages.length
-        };
-
-        if (format === 'txt') {
-            let textExport = `Chat Export for ${contact?.name || jid}\n`;
-            textExport += `Exported on: ${new Date().toISOString()}\n`;
-            textExport += `Total Messages: ${messages.length}\n\n`;
-            textExport += '='.repeat(50) + '\n\n';
-
-            for (const msg of messages) {
-                const timestamp = new Date(msg.messageTimestamp * 1000).toLocaleString();
-                const sender = msg.key.fromMe ? 'You' : (contact?.name || msg.key.participant || 'Unknown');
-                const text = msg.message?.conversation || msg.message?.extendedTextMessage?.text || '[Media/Other]';
-                textExport += `[${timestamp}] ${sender}: ${text}\n`;
-            }
-
-            return textExport;
-        }
-
-        return exportData;
-    }
-
+    /**
+     * Setup enhanced event handlers with ev.process pattern
+     */
     setupEnhancedEventHandlers(saveCreds) {
         this.sock.ev.process(async (events) => {
             try {
+                // Connection updates
                 if (events['connection.update']) {
                     await this.handleConnectionUpdate(events['connection.update']);
                 }
 
+                // Credentials updated
                 if (events['creds.update']) {
                     await saveCreds();
                 }
 
+                // New messages
                 if (events['messages.upsert']) {
                     await this.handleMessagesUpsert(events['messages.upsert']);
                 }
 
-                if (!process.env.DOCKER) {
-                    if (events['labels.association']) {
-                        logger.info('📋 Label association update:', events['labels.association']);
-                    }
+                // Label association
+                if (events['labels.association']) {
+                    logger.debug('🏷️ Label association update:', events['labels.association']);
+                }
 
-                    if (events['labels.edit']) {
-                        logger.info('📝 Label edit update:', events['labels.edit']);
-                    }
+                // Label edit
+                if (events['labels.edit']) {
+                    logger.debug('✏️ Label edit update:', events['labels.edit']);
+                }
 
-                    if (events.call) {
-                        logger.info('📞 Call event received:', events.call);
-                        for (const call of events.call) {
-                            this.store.setCallOffer(call.from, call);
+                // Call events
+                if (events.call) {
+                    logger.info('📞 Call event received:', events.call);
+                }
+
+                // History sync
+                if (events['messaging-history.set']) {
+                    const { chats, contacts, messages, isLatest, progress, syncType } = events['messaging-history.set'];
+                    if (syncType === proto.HistorySync.HistorySyncType.ON_DEMAND) {
+                        logger.info('📥 Received on-demand history sync, messages:', messages.length);
+                    }
+                    logger.info(`📊 History sync: ${chats.length} chats, ${contacts.length} contacts, ${messages.length} msgs (latest: ${isLatest}, progress: ${progress}%)`);
+                }
+
+                // Message updates (delivery, read, delete)
+                if (events['messages.update']) {
+                    for (const { key, update } of events['messages.update']) {
+                        if (update.pollUpdates) {
+                            logger.info('📊 Poll update received for message:', key.id);
                         }
-                    }
-
-                    if (events['messaging-history.set']) {
-                        const { chats, contacts, messages, isLatest, progress, syncType } = events['messaging-history.set'];
-                        if (syncType === proto.HistorySync.HistorySyncType.ON_DEMAND) {
-                            logger.info('📥 Received on-demand history sync, messages:', messages.length);
-                        }
-                        logger.info(`📊 History sync: ${chats.length} chats, ${contacts.length} contacts, ${messages.length} msgs (latest: ${isLatest}, progress: ${progress}%)`);
-                    }
-
-                    if (events['messages.update']) {
-                        for (const { key, update } of events['messages.update']) {
-                            if (update.pollUpdates) {
-                                logger.info('📊 Poll update received');
-                            }
-                        }
-                    }
-
-                    if (events['message-receipt.update']) {
-                        logger.debug('📨 Message receipt update');
-                    }
-
-                    if (events['messages.reaction']) {
-                        logger.info(`😀 Message reactions: ${events['messages.reaction'].length}`);
-                    }
-
-                    if (events['presence.update']) {
-                        logger.debug('👤 Presence updates');
-                    }
-
-                    if (events['chats.update']) {
-                        logger.debug('💬 Chats updated');
-                    }
-
-                    if (events['contacts.update']) {
-                        for (const contact of events['contacts.update']) {
-                            if (typeof contact.imgUrl !== 'undefined') {
-                                logger.info(`👤 Contact ${contact.id} profile pic updated`);
-                            }
-                        }
-                    }
-
-                    if (events['chats.delete']) {
-                        logger.info('🗑️ Chats deleted:', events['chats.delete']);
-                    }
-
-                    if (events['lid-mapping.update']) {
-                        logger.info('🆔 LID mapping update:', events['lid-mapping.update']);
                     }
                 }
+
+                // Message receipts
+                if (events['message-receipt.update']) {
+                    logger.debug('📨 Message receipt update');
+                }
+
+                // Reactions
+                if (events['messages.reaction']) {
+                    logger.info(`😀 Message reactions: ${events['messages.reaction'].length}`);
+                }
+
+                // Presence updates
+                if (events['presence.update']) {
+                    logger.debug('👤 Presence updates:', events['presence.update']);
+                }
+
+                // Chat updates
+                if (events['chats.update']) {
+                    logger.debug('💬 Chats updated:', events['chats.update'].length);
+                }
+
+                // Contact updates
+                if (events['contacts.update']) {
+                    for (const contact of events['contacts.update']) {
+                        if (typeof contact.imgUrl !== 'undefined') {
+                            logger.info(`👤 Contact ${contact.id} profile pic updated`);
+                        }
+                    }
+                }
+
+                // Chat deletions
+                if (events['chats.delete']) {
+                    logger.info('🗑️ Chats deleted:', events['chats.delete']);
+                }
             } catch (error) {
-                logger.warn('⚠️ Event processing error:', error.message);
+                logger.error('⚠️ Event processing error:', error);
             }
         });
     }
@@ -535,22 +330,21 @@ class HyperWaBot {
         }
 
         if (connection === 'close') {
-            const statusCode = lastDisconnect?.error?.output?.statusCode || 0;
+            const statusCode = lastDisconnect?.error?.output?.statusCode;
             const shouldReconnect = statusCode !== DisconnectReason.loggedOut;
+
+            logger.warn(`🔌 Connection closed. Status: ${statusCode}`);
 
             if (shouldReconnect && !this.isShuttingDown) {
                 logger.warn('🔄 Connection closed, reconnecting...');
                 this.store.saveToFile();
                 setTimeout(() => this.startWhatsApp(), 5000);
             } else {
-                logger.error('❌ Connection closed permanently. Please delete auth_info and restart.');
+                logger.error('❌ Connection closed permanently (logged out).');
 
                 if (this.useMongoAuth) {
                     try {
-                        const db = await connectDb();
-                        const coll = db.collection("auth");
-                        await coll.deleteOne({ _id: "session" });
-                        logger.info('🗑️ MongoDB auth session cleared');
+                        await clearMongoAuthState();
                     } catch (error) {
                         logger.error('❌ Failed to clear MongoDB auth session:', error);
                     }
@@ -565,6 +359,13 @@ class HyperWaBot {
     }
 
     async handleMessagesUpsert(upsert) {
+        logger.debug(`📬 Messages upsert: type=${upsert.type}, count=${upsert.messages.length}`);
+
+        if (upsert.requestId) {
+            logger.info(`📋 Placeholder message received for request: ${upsert.requestId}`);
+        }
+
+        // Process messages
         if (upsert.type === 'notify') {
             for (const msg of upsert.messages) {
                 try {
@@ -575,18 +376,23 @@ class HyperWaBot {
             }
         }
 
+        // Pass to message handler
         try {
-            await this.messageHandler.handleMessages({ messages: upsert.messages, type: upsert.type });
+            await this.messageHandler.handleMessages({ 
+                messages: upsert.messages, 
+                type: upsert.type 
+            });
         } catch (error) {
-            logger.warn('⚠️ Original message handler error:', error.message);
+            logger.warn('⚠️ Message handler error:', error.message);
         }
     }
 
     async processIncomingMessage(msg, upsert) {
         const text = msg.message?.conversation || msg.message?.extendedTextMessage?.text;
-
+        
         if (!text) return;
 
+        // Handle special debug commands
         if (text === "requestPlaceholder" && !upsert.requestId) {
             const messageId = await this.sock.requestPlaceholderResend(msg.key);
             logger.info('🔄 Requested placeholder resync, ID:', messageId);
@@ -612,7 +418,7 @@ class HyperWaBot {
             try {
                 await this.telegramBridge.setupWhatsAppHandlers();
             } catch (err) {
-                logger.warn('⚠️ Failed to setup Telegram WhatsApp handlers:', err.message);
+                logger.warn('⚠️ Failed to setup Telegram handlers:', err.message);
             }
         }
 
@@ -633,7 +439,7 @@ class HyperWaBot {
 
         const authMethod = this.useMongoAuth ? 'MongoDB' : 'File-based';
         const storeStats = this.getStoreStats();
-
+        
         const startupMessage = `🚀 *${config.get('bot.name')} v${config.get('bot.version')}* is now online!\n\n` +
                               `🔥 *HyperWa Features Active:*\n` +
                               `• 📱 Modular Architecture\n` +
@@ -641,12 +447,14 @@ class HyperWaBot {
                               `• 📊 Store Stats: ${storeStats.chats} chats, ${storeStats.contacts} contacts, ${storeStats.messages} messages\n` +
                               `• 🔐 Auth Method: ${authMethod}\n` +
                               `• 🤖 Telegram Bridge: ${config.get('telegram.enabled') ? '✅' : '❌'}\n` +
-                              `• 🔧 Baileys v7.x: ✅\n` +
+                              `• 🔧 Custom Modules: ${config.get('features.customModules') ? '✅' : '❌'}\n` +
                               `Type *${config.get('bot.prefix')}help* for available commands!`;
 
         try {
             await this.sendMessage(owner, { text: startupMessage });
-        } catch {}
+        } catch (err) {
+            logger.warn('⚠️ Failed to send startup message:', err.message);
+        }
 
         if (this.telegramBridge) {
             try {
@@ -657,18 +465,11 @@ class HyperWaBot {
         }
     }
 
-    async connect() {
-        if (!this.sock) {
-            await this.startWhatsApp();
-        }
-        return this.sock;
-    }
-
     async sendMessage(jid, content) {
         if (!this.sock) {
             throw new Error('WhatsApp socket not initialized');
         }
-
+        
         return await this.sock.sendMessage(jid, content);
     }
 
@@ -676,6 +477,8 @@ class HyperWaBot {
         logger.info('🛑 Shutting down HyperWa Userbot...');
         this.isShuttingDown = true;
 
+        // Save and cleanup store
+        this.store.saveToFile();
         this.store.cleanup();
 
         if (this.telegramBridge) {
@@ -692,6 +495,31 @@ class HyperWaBot {
 
         logger.info('✅ HyperWa Userbot shutdown complete');
     }
+
+    // Store-powered helper methods
+    getChatInfo(jid) {
+        return this.store.chats[jid] || null;
+    }
+
+    getContactInfo(jid) {
+        return this.store.contacts[jid] || null;
+    }
+
+    getChatMessages(jid, limit = 50) {
+        const messages = this.store.getMessages(jid);
+        return messages.slice(-limit).reverse();
+    }
+
+    getGroupInfo(jid) {
+        const metadata = this.store.groupMetadata[jid];
+        const chat = this.store.chats[jid];
+        return {
+            metadata,
+            chat,
+            participants: metadata?.participants || []
+        };
+    }
 }
 
 export { HyperWaBot };
+export default HyperWaBot;
