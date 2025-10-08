@@ -2,7 +2,9 @@ import {  GoogleGenerativeAI, HarmBlockThreshold, HarmCategory  } from '@google/
 import {  downloadContentFromMessage  } from '@whiskeysockets/baileys';
 import config from '../config.js';
 import logger from '../Core/logger.js';
-import Database from '../utils/db.js';
+// FIX/WORKAROUND: Changing to namespace import to handle potential CommonJS/ES Module export conflicts
+import * as dbModule from '../utils/db.js'; 
+const Database = dbModule.default || dbModule.Database || dbModule; // Attempt to get the constructor
 
 class ChatBotModule {
     constructor(bot) {
@@ -481,7 +483,8 @@ Keep responses concise but informative. Be engaging and personable.`;
                     `- Remember chat history (${this.maxConversationLength} messages)\n` +
                     `- Process text, images, videos, and audio\n` +
                     `- Answer questions on any topic\n` +
-                    `- Help with tasks and problems\n\n` +
+                    `- Help with tasks and problems\n` +
+                    `- I am powered by **Gemini AI**\n\n` +
                     `Commands:\n` +
                     `.chat on/off [number] - Toggle for user/group\n` +
                     `.chatall on/off - Global toggle (owner)\n` +
