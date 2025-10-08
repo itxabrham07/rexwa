@@ -1,8 +1,11 @@
-const pino = require('pino');
-const path = require('path');
-const fs = require('fs-extra');
+import pino from 'pino';
+import path from 'path';
+import fs from 'fs-extra';
+import { fileURLToPath } from 'url';
 
-// Ensure logs directory exists
+const __filename = fileURLToPath(import.meta.url);
+const __dirname = path.dirname(__filename);
+
 const logsDir = path.join(__dirname, '../logs');
 fs.ensureDirSync(logsDir);
 
@@ -31,4 +34,4 @@ const logger = pino({
     }
 });
 
-module.exports = logger;
+export default logger;

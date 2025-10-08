@@ -1,8 +1,9 @@
 {
   "name": "HyperWa",
-  "version": "2.0.0",
+  "version": "3.0.0",
   "description": "Advanced modular WhatsApp bot with Telegram integration",
   "main": "index.js",
+  "type": "module",
   "private": true,
   "scripts": {
     "start": "node index.js",
@@ -10,7 +11,9 @@
     "test": "echo \"Error: no test specified\" && exit 1"
   },
   "dependencies": {
-    "@whiskeysockets/baileys": "^6.6.0",
+    "@whiskeysockets/baileys": "^7.1.2",
+    "@hapi/boom": "^10.0.1",
+    "@cacheable/node-cache": "^1.1.0",
     "axios": "^1.6.2",
     "node-telegram-bot-api": "^0.64.0",
     "pino": "^8.17.2",

@@ -1,16 +1,25 @@
-const { default: makeWASocket, useMultiFileAuthState, DisconnectReason, fetchLatestBaileysVersion, makeCacheableSignalKeyStore, getAggregateVotesInPollMessage, isJidNewsletter, delay, proto } = require('@whiskeysockets/baileys');
-const qrcode = require('qrcode-terminal');
-const fs = require('fs-extra');
-const path = require('path');
-const NodeCache = require('node-cache');
-const { makeInMemoryStore } = require('./store'); 
-
-const config = require('../config');
-const logger = require('./logger');
-const MessageHandler = require('./message-handler');
-const { connectDb } = require('../utils/db');
-const ModuleLoader = require('./module-loader');
-const { useMongoAuthState } = require('../utils/mongoAuthState');
+import { Boom } from '@hapi/boom';
+import makeWASocket, {
+    DisconnectReason,
+    fetchLatestBaileysVersion,
+    makeCacheableSignalKeyStore,
+    useMultiFileAuthState,
+    getAggregateVotesInPollMessage,
+    isJidNewsletter,
+    proto,
+    delay
+} from '@whiskeysockets/baileys';
+import qrcode from 'qrcode-terminal';
+import fs from 'fs-extra';
+import path from 'path';
+import NodeCache from '@cacheable/node-cache';
+import { makeInMemoryStore } from './store.js';
+import config from '../config.js';
+import logger from './logger.js';
+import MessageHandler from './message-handler.js';
+import { connectDb } from '../utils/db.js';
+import ModuleLoader from './module-loader.js';
+import { useMongoAuthState } from '../utils/mongoAuthState.js';
 
 class HyperWaBot {
     constructor() {
@@ -23,37 +32,31 @@ class HyperWaBot {
         this.moduleLoader = new ModuleLoader(this);
         this.qrCodeSent = false;
         this.useMongoAuth = config.get('auth.useMongoAuth', false);
-        
-        // Initialize the enhanced store with advanced options
+
         this.store = makeInMemoryStore({
             logger: logger.child({ module: 'store' }),
             filePath: config.get('store.filePath', './whatsapp-store.json'),
             autoSaveInterval: config.get('store.autoSaveInterval', 30000)
         });
 
-        // Load existing store data on startup
         this.store.loadFromFile();
-        
-        // Enhanced features from example - SIMPLE VERSION
+
         this.msgRetryCounterCache = new NodeCache({
             stdTTL: 300,
             maxKeys: 500
         });
         this.onDemandMap = new Map();
-        
-        // Simple memory cleanup
+
         setInterval(() => {
             if (this.onDemandMap.size > 100) {
                 this.onDemandMap.clear();
             }
         }, 300000);
 
-        // Store event listeners for advanced features
         this.setupStoreEventListeners();
     }
 
     setupStoreEventListeners() {
-        // Monitor store events for analytics and features
         this.store.on('messages.upsert', (data) => {
             logger.debug(`📝 Store: ${data.messages.length} messages cached`);
         });
@@ -66,11 +69,10 @@ class HyperWaBot {
             logger.debug(`💬 Store: ${chats.length} chats cached`);
         });
 
-        // Log store statistics periodically
         setInterval(() => {
             const stats = this.getStoreStats();
             logger.info(`📊 Store Stats - Chats: ${stats.chats}, Contacts: ${stats.contacts}, Messages: ${stats.messages}`);
-        }, 300000); // Every 5 minutes
+        }, 300000);
     }
 
     getStoreStats() {
@@ -78,7 +80,7 @@ class HyperWaBot {
         const contactCount = Object.keys(this.store.contacts).length;
         const messageCount = Object.values(this.store.messages)
             .reduce((total, chatMessages) => total + Object.keys(chatMessages).length, 0);
-        
+
         return {
             chats: chatCount,
             contacts: contactCount,
@@ -87,7 +89,7 @@ class HyperWaBot {
     }
 
     async initialize() {
-        logger.info('🔧 Initializing HyperWa Userbot with Enhanced Store...');
+        logger.info('🔧 Initializing HyperWa Userbot v3.0 with Baileys 7.x...');
 
         try {
             this.db = await connectDb();
@@ -99,7 +101,7 @@ class HyperWaBot {
 
         if (config.get('telegram.enabled')) {
             try {
-                const TelegramBridge = require('../telegram/bridge');
+                const { default: TelegramBridge } = await import('../telegram/bridge.js');
                 this.telegramBridge = new TelegramBridge(this);
                 await this.telegramBridge.initialize();
                 logger.info('✅ Telegram bridge initialized');
@@ -118,13 +120,12 @@ class HyperWaBot {
         await this.moduleLoader.loadModules();
         await this.startWhatsApp();
 
-        logger.info('✅ HyperWa Userbot with Enhanced Store initialized successfully!');
+        logger.info('✅ HyperWa Userbot v3.0 initialized successfully!');
     }
 
     async startWhatsApp() {
         let state, saveCreds;
 
-        // Clean up existing socket if present
         if (this.sock) {
             logger.info('🧹 Cleaning up existing WhatsApp socket');
             this.sock.ev.removeAllListeners();
@@ -132,7 +133,6 @@ class HyperWaBot {
             this.sock = null;
         }
 
-        // Choose auth method based on configuration
         if (this.useMongoAuth) {
             logger.info('🔧 Using MongoDB auth state...');
             try {
@@ -163,14 +163,11 @@ class HyperWaBot {
                 generateHighQualityLinkPreview: true,
                 getMessage: this.getMessage.bind(this),
                 browser: ['HyperWa', 'Chrome', '3.0'],
-                // Enable message history for better message retrieval
                 syncFullHistory: false,
                 markOnlineOnConnect: true,
-                // Add firewall bypass
                 firewall: false
             });
 
-            // CRITICAL: Bind store to socket events for data persistence
             this.store.bind(this.sock.ev);
             logger.info('🔗 Store bound to WhatsApp socket events');
 
@@ -202,10 +199,8 @@ class HyperWaBot {
         }
     }
 
-    // Enhanced getMessage with store lookup
     async getMessage(key) {
         try {
-            // Try to get message from store first
             if (key?.remoteJid && key?.id) {
                 const storedMessage = this.store.loadMessage(key.remoteJid, key.id);
                 if (storedMessage) {
@@ -213,8 +208,7 @@ class HyperWaBot {
                     return storedMessage;
                 }
             }
-            
-            // Return undefined instead of fake message to avoid decryption issues
+
             return undefined;
         } catch (error) {
             logger.warn('⚠️ Error retrieving message:', error.message);
@@ -222,41 +216,27 @@ class HyperWaBot {
         }
     }
 
-    // Store-powered helper methods
-    
-    /**
-     * Get chat information from store
-     */
     getChatInfo(jid) {
         return this.store.chats[jid] || null;
     }
 
-    /**
-     * Get contact information from store
-     */
     getContactInfo(jid) {
         return this.store.contacts[jid] || null;
     }
 
-    /**
-     * Get all messages for a chat
-     */
     getChatMessages(jid, limit = 50) {
         const messages = this.store.getMessages(jid);
-        return messages.slice(-limit).reverse(); // Get latest messages
+        return messages.slice(-limit).reverse();
     }
 
-    /**
-     * Search messages by text content
-     */
     searchMessages(query, jid = null) {
         const results = [];
         const chatsToSearch = jid ? [jid] : Object.keys(this.store.messages);
-        
+
         for (const chatId of chatsToSearch) {
             const messages = this.store.getMessages(chatId);
             for (const msg of messages) {
-                const text = msg.message?.conversation || 
+                const text = msg.message?.conversation ||
                            msg.message?.extendedTextMessage?.text || '';
                 if (text.toLowerCase().includes(query.toLowerCase())) {
                     results.push({
@@ -267,13 +247,10 @@ class HyperWaBot {
                 }
             }
         }
-        
-        return results.slice(0, 100); // Limit results
+
+        return results.slice(0, 100);
     }
 
-    /**
-     * Get group metadata with participant info
-     */
     getGroupInfo(jid) {
         const metadata = this.store.groupMetadata[jid];
         const chat = this.store.chats[jid];
@@ -284,21 +261,18 @@ class HyperWaBot {
         };
     }
 
-    /**
-     * Get user's message history statistics
-     */
     getUserStats(jid) {
         let messageCount = 0;
         let lastMessageTime = null;
-        
+
         for (const chatId of Object.keys(this.store.messages)) {
             const messages = this.store.getMessages(chatId);
-            const userMessages = messages.filter(msg => 
+            const userMessages = messages.filter(msg =>
                 msg.key?.participant === jid || msg.key?.remoteJid === jid
             );
-            
+
             messageCount += userMessages.length;
-            
+
             if (userMessages.length > 0) {
                 const lastMsg = userMessages[userMessages.length - 1];
                 const msgTime = lastMsg.messageTimestamp * 1000;
@@ -307,22 +281,19 @@ class HyperWaBot {
                 }
             }
         }
-        
+
         return {
             messageCount,
             lastMessageTime: lastMessageTime ? new Date(lastMessageTime) : null,
-            isActive: lastMessageTime && (Date.now() - lastMessageTime) < (7 * 24 * 60 * 60 * 1000) // Active in last 7 days
+            isActive: lastMessageTime && (Date.now() - lastMessageTime) < (7 * 24 * 60 * 60 * 1000)
         };
     }
 
-    /**
-     * Export chat history
-     */
     async exportChatHistory(jid, format = 'json') {
         const chat = this.getChatInfo(jid);
-        const messages = this.getChatMessages(jid, 1000); // Last 1000 messages
+        const messages = this.getChatMessages(jid, 1000);
         const contact = this.getContactInfo(jid);
-        
+
         const exportData = {
             chat,
             contact,
@@ -335,15 +306,15 @@ class HyperWaBot {
             let textExport = `Chat Export for ${contact?.name || jid}\n`;
             textExport += `Exported on: ${new Date().toISOString()}\n`;
             textExport += `Total Messages: ${messages.length}\n\n`;
-            textExport += '=' .repeat(50) + '\n\n';
-            
+            textExport += '='.repeat(50) + '\n\n';
+
             for (const msg of messages) {
                 const timestamp = new Date(msg.messageTimestamp * 1000).toLocaleString();
                 const sender = msg.key.fromMe ? 'You' : (contact?.name || msg.key.participant || 'Unknown');
                 const text = msg.message?.conversation || msg.message?.extendedTextMessage?.text || '[Media/Other]';
                 textExport += `[${timestamp}] ${sender}: ${text}\n`;
             }
-            
+
             return textExport;
         }
 
@@ -365,7 +336,6 @@ class HyperWaBot {
                     await this.handleMessagesUpsert(events['messages.upsert']);
                 }
 
-                // Store automatically handles most events, but we can add custom logic
                 if (!process.env.DOCKER) {
                     if (events['labels.association']) {
                         logger.info('📋 Label association update:', events['labels.association']);
@@ -377,7 +347,6 @@ class HyperWaBot {
 
                     if (events.call) {
                         logger.info('📞 Call event received:', events.call);
-                        // Store call information
                         for (const call of events.call) {
                             this.store.setCallOffer(call.from, call);
                         }
@@ -426,6 +395,10 @@ class HyperWaBot {
                     if (events['chats.delete']) {
                         logger.info('🗑️ Chats deleted:', events['chats.delete']);
                     }
+
+                    if (events['lid-mapping.update']) {
+                        logger.info('🆔 LID mapping update:', events['lid-mapping.update']);
+                    }
                 }
             } catch (error) {
                 logger.warn('⚠️ Event processing error:', error.message);
@@ -455,7 +428,6 @@ class HyperWaBot {
 
             if (shouldReconnect && !this.isShuttingDown) {
                 logger.warn('🔄 Connection closed, reconnecting...');
-                // Save store before reconnecting
                 this.store.saveToFile();
                 setTimeout(() => this.startWhatsApp(), 5000);
             } else {
@@ -472,7 +444,6 @@ class HyperWaBot {
                     }
                 }
 
-                // Final store save
                 this.store.saveToFile();
                 process.exit(1);
             }
@@ -501,10 +472,9 @@ class HyperWaBot {
 
     async processIncomingMessage(msg, upsert) {
         const text = msg.message?.conversation || msg.message?.extendedTextMessage?.text;
-        
+
         if (!text) return;
 
-        // Handle special commands
         if (text === "requestPlaceholder" && !upsert.requestId) {
             const messageId = await this.sock.requestPlaceholderResend(msg.key);
             logger.info('🔄 Requested placeholder resync, ID:', messageId);
@@ -516,7 +486,6 @@ class HyperWaBot {
             logger.info('📥 Requested on-demand sync, ID:', messageId);
             return;
         }
-
     }
 
     async onConnectionOpen() {
@@ -552,7 +521,7 @@ class HyperWaBot {
 
         const authMethod = this.useMongoAuth ? 'MongoDB' : 'File-based';
         const storeStats = this.getStoreStats();
-        
+
         const startupMessage = `🚀 *${config.get('bot.name')} v${config.get('bot.version')}* is now online!\n\n` +
                               `🔥 *HyperWa Features Active:*\n` +
                               `• 📱 Modular Architecture\n` +
@@ -560,7 +529,7 @@ class HyperWaBot {
                               `• 📊 Store Stats: ${storeStats.chats} chats, ${storeStats.contacts} contacts, ${storeStats.messages} messages\n` +
                               `• 🔐 Auth Method: ${authMethod}\n` +
                               `• 🤖 Telegram Bridge: ${config.get('telegram.enabled') ? '✅' : '❌'}\n` +
-                              `• 🔧 Custom Modules: ${config.get('features.customModules') ? '✅' : '❌'}\n` +
+                              `• 🔧 Baileys v7.x: ✅\n` +
                               `Type *${config.get('bot.prefix')}help* for available commands!`;
 
         try {
@@ -587,7 +556,7 @@ class HyperWaBot {
         if (!this.sock) {
             throw new Error('WhatsApp socket not initialized');
         }
-        
+
         return await this.sock.sendMessage(jid, content);
     }
 
@@ -595,7 +564,6 @@ class HyperWaBot {
         logger.info('🛑 Shutting down HyperWa Userbot...');
         this.isShuttingDown = true;
 
-        // Cleanup store
         this.store.cleanup();
 
         if (this.telegramBridge) {
@@ -614,4 +582,4 @@ class HyperWaBot {
     }
 }
 
-module.exports = { HyperWaBot };
+export { HyperWaBot };
