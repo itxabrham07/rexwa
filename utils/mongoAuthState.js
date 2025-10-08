@@ -1,8 +1,8 @@
-const { useMultiFileAuthState } = require("@whiskeysockets/baileys");
-const fs = require("fs-extra");
-const path = require("path");
-const tar = require("tar");
-const { connectDb } = require("./db");
+import { useMultiFileAuthState } from '@whiskeysockets/baileys';
+import fs from 'fs-extra';
+import path from 'path';
+import tar from 'tar';
+import { connectDb } from './db.js';
 
 const AUTH_DIR = "./auth_info";
 const AUTH_TAR = "auth_backup.tar";
@@ -88,4 +88,4 @@ async function useMongoAuthState() {
     return { state, saveCreds };
 }
 
-module.exports = { useMongoAuthState };
+export { useMongoAuthState };

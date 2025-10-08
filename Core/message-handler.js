@@ -1,6 +1,6 @@
-const logger = require('./logger');
-const config = require('../config');
-const rateLimiter = require('./rate-limiter');
+import logger from './logger.js';
+import config from '../config.js';
+import rateLimiter from './rate-limiter.js';
 
 class MessageHandler {
     constructor(bot) {
@@ -330,4 +330,4 @@ checkPermissions(msg, commandName) {
     }
 }
 
-module.exports = MessageHandler;
+export default MessageHandler;

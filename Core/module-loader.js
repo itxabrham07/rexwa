@@ -1,10 +1,15 @@
-const path = require('path');
-const fs = require('fs-extra');
-const logger = require('./logger');
-const config = require('../config');
-const helpers = require('../utils/helpers');
-// Temporary in-memory store; replace with DB for persistence
+import path from 'path';
+import fs from 'fs-extra';
+import { fileURLToPath } from 'url';
+import logger from './logger.js';
+import config from '../config.js';
+import helpers from '../utils/helpers.js';
+
+const __filename = fileURLToPath(import.meta.url);
+const __dirname = path.dirname(__filename);
+
 const helpPreferences = new Map();
+
 class ModuleLoader {
     constructor(bot) {
         this.bot = bot;
@@ -12,11 +17,10 @@ class ModuleLoader {
         this.systemModulesCount = 0;
         this.customModulesCount = 0;
         this.setupModuleCommands();
-        
+
     }
 
     setupModuleCommands() {
-        // Load Module Command
         const loadModuleCommand = {
             name: 'lm',
             description: 'Load a module from file',
@@ -35,24 +39,24 @@ class ModuleLoader {
                         text: '⚡ *Loading Module*\n\n🔄 Downloading and installing module...\n⏳ Please wait...'
                     });
 
-                    const { downloadContentFromMessage } = require('@whiskeysockets/baileys');
+                    const { downloadContentFromMessage } = await import('@whiskeysockets/baileys');
                     const stream = await downloadContentFromMessage(msg.message.documentMessage, 'document');
-                    
+
                     const chunks = [];
                     for await (const chunk of stream) {
                         chunks.push(chunk);
                     }
                     const buffer = Buffer.concat(chunks);
-                    
+
                     const fileName = msg.message.documentMessage.fileName;
                     const customModulesPath = path.join(__dirname, '../custom_modules');
                     await fs.ensureDir(customModulesPath);
-                    
+
                     const filePath = path.join(customModulesPath, fileName);
                     await fs.writeFile(filePath, buffer);
-                    
+
                     await this.loadModule(filePath, false);
-                    
+
                     await context.bot.sock.sendMessage(context.sender, {
                         text: `✅ *Module Loaded Successfully*\n\n📦 Module: \`${fileName}\`\n📁 Location: Custom Modules\n🎯 Status: Active\n⏰ ${new Date().toLocaleTimeString()}`,
                         edit: processingMsg.key
@@ -67,7 +71,6 @@ class ModuleLoader {
             }
         };
 
-        // Unload Module Command
         const unloadModuleCommand = {
             name: 'ulm',
             description: 'Unload a module',
@@ -82,14 +85,14 @@ class ModuleLoader {
                 }
 
                 const moduleName = params[0];
-                
+
                 try {
                     const processingMsg = await context.bot.sendMessage(context.sender, {
                         text: `⚡ *Unloading Module*\n\n🔄 Removing: \`${moduleName}\`\n⏳ Please wait...`
                     });
 
                     await this.unloadModule(moduleName);
-                    
+
                     await context.bot.sock.sendMessage(context.sender, {
                         text: `✅ *Module Unloaded Successfully*\n\n📦 Module: \`${moduleName}\`\n🗑️ Status: Removed\n⏰ ${new Date().toLocaleTimeString()}`,
                         edit: processingMsg.key
@@ -104,7 +107,6 @@ class ModuleLoader {
             }
         };
 
-        // List Modules Command
         const listModulesCommand = {
             name: 'modules',
             description: 'List all loaded modules',
@@ -113,7 +115,7 @@ class ModuleLoader {
             execute: async (msg, params, context) => {
                 const systemModules = [];
                 const customModules = [];
-                
+
                 for (const [name, moduleInfo] of this.modules) {
                     if (moduleInfo.isSystem) {
                         systemModules.push(name);
@@ -129,21 +131,20 @@ class ModuleLoader {
                 } else {
                     moduleText += `• None loaded\n\n`;
                 }
-                
+
                 moduleText += `🎨 **Custom Modules (${customModules.length}):**\n`;
                 if (customModules.length > 0) {
                     moduleText += `• ${customModules.join('\n• ')}\n\n`;
                 } else {
                     moduleText += `• None loaded\n\n`;
                 }
-                
+
                 moduleText += `📈 **Total:** ${this.modules.size} modules active`;
 
                 await context.bot.sendMessage(context.sender, { text: moduleText });
             }
         };
 
-        // Register module management commands
         this.bot.messageHandler.registerCommandHandler('lm', loadModuleCommand);
         this.bot.messageHandler.registerCommandHandler('ulm', unloadModuleCommand);
         this.bot.messageHandler.registerCommandHandler('modules', listModulesCommand);
@@ -178,7 +179,6 @@ async loadModules() {
 logger.info(`Modules Loaded || 🧩 System: ${this.systemModulesCount} || 📦 Custom: ${this.customModulesCount} || 📊 Total: ${this.systemModulesCount + this.customModulesCount}`);
 
 
-        // Load help system after all modules
         this.setupHelpSystem();
 
     }
@@ -189,7 +189,7 @@ setupHelpSystem() {
     const helpPreferences = new Map();
 
     const getUserPermissions = (userId) => {
-        const owner = config.get('bot.owner')?.split('@')[0]; // Get owner ID without domain
+        const owner = config.get('bot.owner')?.split('@')[0];
         const isOwner = owner === userId;
         const admins = config.get('bot.admins') || [];
         const isAdmin = admins.includes(userId);
@@ -202,7 +202,7 @@ setupHelpSystem() {
         usage: '.help [module_name] | .help 1|2 | .help show 1|2|3',
         permissions: 'public',
         execute: async (msg, params, context) => {
-        const userId = context.sender.split('@')[0]; // Normalize userId
+        const userId = context.sender.split('@')[0];
         const userPerms = getUserPermissions(userId);
 
         const helpConfig = config.get('help') || {};
@@ -210,7 +210,6 @@ setupHelpSystem() {
         const defaultShow = helpConfig.defaultShow || 'description';
         const pref = helpPreferences.get(userId) || { style: defaultStyle, show: defaultShow };
 
-            // Handle `.help 1` / `.help 2` (style switch)
             if (params.length === 1 && ['1', '2'].includes(params[0])) {
                 pref.style = Number(params[0]);
                 helpPreferences.set(userId, pref);
@@ -220,7 +219,6 @@ setupHelpSystem() {
                 return;
             }
 
-            // Handle `.help show 1|2|3`
             if (params.length === 2 && params[0] === 'show') {
                 const map = { '1': 'description', '2': 'usage', '3': 'none' };
                 if (!map[params[1]]) {
@@ -235,7 +233,6 @@ setupHelpSystem() {
                 });
             }
 
-            // Handle `.help [module]`
             if (params.length === 1) {
                 const moduleName = params[0].toLowerCase();
                 const moduleInfo = this.getModule(moduleName);
@@ -280,7 +277,6 @@ setupHelpSystem() {
                 return await context.bot.sendMessage(context.sender, { text: out });
             }
 
-            // Render all modules
             const systemModules = [];
             const customModules = [];
 
@@ -353,16 +349,14 @@ await context.bot.sendMessage(context.sender, { text: helpText.trim() });
         const moduleId = path.basename(filePath, '.js');
 
         try {
-            delete require.cache[require.resolve(filePath)];
-            const mod = require(filePath);
+            const mod = await import(filePath + '?update=' + Date.now());
 
-            const moduleInstance = typeof mod === 'function' && /^\s*class\s/.test(mod.toString()) 
-                                   ? new mod(this.bot) 
-                                   : mod;
+            const moduleInstance = typeof mod.default === 'function' && /^\s*class\s/.test(mod.default.toString())
+                                   ? new mod.default(this.bot)
+                                   : (mod.default || mod);
 
             const actualModuleId = (moduleInstance && moduleInstance.name) ? moduleInstance.name : moduleId;
 
-            // Validate module structure
             if (!moduleInstance.metadata) {
                 moduleInstance.metadata = {
                     description: 'No description provided',
@@ -386,7 +380,6 @@ await context.bot.sendMessage(context.sender, { text: helpText.trim() });
 
                     const ui = cmd.ui || {};
 
-                    // Only wrap commands that have UI config (structured modules)
 const shouldWrap = cmd.ui && (cmd.autoWrap !== false);
 const wrappedCmd = shouldWrap ? {
     ...cmd,
@@ -399,12 +392,11 @@ const wrappedCmd = shouldWrap ? {
             }
         });
     }
-} : cmd; // Use original command without wrapping
+} : cmd;
 
 
                     this.bot.messageHandler.registerCommandHandler(cmd.name, wrappedCmd);
 
-                    // Register aliases if they exist
                     if (cmd.aliases && Array.isArray(cmd.aliases)) {
                         for (const alias of cmd.aliases) {
                             if (alias && typeof alias === 'string') {
@@ -448,7 +440,7 @@ const wrappedCmd = shouldWrap ? {
     listModules() {
         return [...this.modules.keys()];
     }
-    
+
     async unloadModule(moduleId) {
         const moduleInfo = this.modules.get(moduleId);
         if (!moduleInfo) {
@@ -466,16 +458,15 @@ const wrappedCmd = shouldWrap ? {
                 }
             }
         }
-        if (moduleInfo.instance.messageHooks && typeof moduleInfo.instance.messageHooks === 'object') {
+        if (moduleInstance.messageHooks && typeof moduleInfo.instance.messageHooks === 'object') {
             for (const hook of Object.keys(moduleInfo.instance.messageHooks)) {
                 this.bot.messageHandler.unregisterMessageHook(hook);
             }
         }
 
         this.modules.delete(moduleId);
-        delete require.cache[moduleInfo.path];
         logger.info(`🚫 Unloaded module: ${moduleId}`);
     }
 }
 
-module.exports = ModuleLoader;
+export default ModuleLoader;
