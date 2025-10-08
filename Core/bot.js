@@ -23,9 +23,11 @@ import { connectDb } from '../utils/db.js';
 import ModuleLoader from './module-loader.js';
 import { useMongoAuthState, clearMongoAuthState } from '../utils/mongoAuthState.js';
 
+const logLevel = config.get('log.level') || 'info'; // Use a simple OR fallback
+
 // Initialize logger
 const logger = P({
-    level: config.get('log.level', 'info'),
+    level: logLevel, // Pass the guaranteed string level
     transport: config.get('log.pretty', false) ? {
         target: 'pino-pretty',
         options: { colorize: true }
