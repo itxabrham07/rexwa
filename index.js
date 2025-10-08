@@ -1,9 +1,10 @@
-const { HyperWaBot } = require('./Core/bot');
-const logger = require('./Core/logger');
-const config = require('./config');
+import { HyperWaBot } from './Core/bot.js';
+import logger from './Core/logger.js';
+import config from './config.js';
+import * as crypto from 'crypto';
 
 // Polyfill crypto if needed
-global.crypto = require('crypto');
+global.crypto = crypto;
 
 async function main() {
     try {
@@ -49,16 +50,16 @@ async function main() {
 console.log(`
 ╔══════════════════════════════════════════════════════════════╗
 ║                                                              ║
-║    ██╗  ██╗██╗   ██╗██████╗ ███████╗██████╗ ██╗    ██╗ █████╗ ║
-║    ██║  ██║╚██╗ ██╔╝██╔══██╗██╔════╝██╔══██╗██║    ██║██╔══██╗║
+║    ██╗  ██╗██╗   ██╗██████╗ ███████╗██████╗ ██╗     ██╗ █████╗ ║
+║    ██║  ██║╚██╗ ██╔╝██╔══██╗██╔════╝██╔══██╗██║     ██║██╔══██╗║
 ║    ███████║ ╚████╔╝ ██████╔╝█████╗  ██████╔╝██║ █╗ ██║███████║║
 ║    ██╔══██║  ╚██╔╝  ██╔═══╝ ██╔══╝  ██╔══██╗██║███╗██║██╔══██║║
-║    ██║  ██║   ██║   ██║     ███████╗██║  ██║╚███╔███╔╝██║  ██║║
-║    ╚═╝  ╚═╝   ╚═╝   ╚═╝     ╚══════╝╚═╝  ╚═╝ ╚══╝╚══╝ ╚═╝  ╚═╝║
+║    ██║  ██║   ██║  ██║      ███████╗██║  ██║╚███╔███╔╝██║  ██║║
+║    ╚═╝  ╚═╝   ╚═╝  ╚═╝      ╚══════╝╚═╝  ╚═╝ ╚══╝╚══╝ ╚═╝  ╚═╝║
 ║                                                              ║
-║                    Advanced WhatsApp Userbot                ║
-║                      Version 3.0.0                          ║
-║                  Dawium Technologies                        ║
+║                    Advanced WhatsApp Userbot                 ║
+║                      Version 3.0.0                           ║
+║                    Dawium Technologies                       ║
 ║                                                              ║
 ╚══════════════════════════════════════════════════════════════╝
 `);
