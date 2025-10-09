@@ -74,6 +74,11 @@ class HyperWaBot {
             logger.debug(`💬 Store: ${chats.length} chats cached`);
         });
 
+        // LID mapping update listener (Baileys 6.8.0+)
+        this.store.on('lid-mapping.update', (mapping) => {
+            logger.debug(`🔑 LID Mapping Update: ${Object.keys(mapping).length} mappings`);
+        });
+
         // Log store statistics periodically
         setInterval(() => {
             const stats = this.getStoreStats();
@@ -240,10 +245,43 @@ class HyperWaBot {
     }
 
     /**
-     * Get contact information from store
+     * Get contact information from store (LID-compatible)
      */
     getContactInfo(jid) {
-        return this.store.contacts[jid] || null;
+        const contact = this.store.contacts[jid];
+        if (!contact && this.sock?.signalRepository?.lidMapping) {
+            // Try to find by LID or PN
+            const lid = this.sock.signalRepository.lidMapping.getLIDForPN(jid);
+            if (lid) {
+                return this.store.contacts[lid] || null;
+            }
+        }
+        return contact || null;
+    }
+
+    /**
+     * Get LID for phone number JID
+     */
+    getLIDForJID(jid) {
+        if (!this.sock?.signalRepository?.lidMapping) return null;
+        return this.sock.signalRepository.lidMapping.getLIDForPN(jid);
+    }
+
+    /**
+     * Get PN (phone number) for LID
+     */
+    getPNForLID(lid) {
+        if (!this.sock?.signalRepository?.lidMapping) return null;
+        return this.sock.signalRepository.lidMapping.getPNForLID(lid);
+    }
+
+    /**
+     * Resolve JID (works with both LID and PN)
+     */
+    resolveJID(jid) {
+        // Return the preferred ID format
+        const contact = this.getContactInfo(jid);
+        return contact?.id || jid;
     }
 
     /**
@@ -293,16 +331,24 @@ class HyperWaBot {
     }
 
     /**
-     * Get user's message history statistics
+     * Get user's message history statistics (LID-compatible)
      */
     getUserStats(jid) {
         let messageCount = 0;
         let lastMessageTime = null;
         
+        // Get both LID and PN for the user
+        const lid = this.getLIDForJID(jid);
+        const pn = this.getPNForLID(jid);
+        const jidsToCheck = [jid, lid, pn].filter(Boolean);
+        
         for (const chatId of Object.keys(this.store.messages)) {
             const messages = this.store.getMessages(chatId);
             const userMessages = messages.filter(msg => 
-                msg.key?.participant === jid || msg.key?.remoteJid === jid
+                jidsToCheck.includes(msg.key?.participant) || 
+                jidsToCheck.includes(msg.key?.remoteJid) ||
+                jidsToCheck.includes(msg.key?.participantAlt) ||
+                jidsToCheck.includes(msg.key?.remoteJidAlt)
             );
             
             messageCount += userMessages.length;
