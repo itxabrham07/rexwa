@@ -47,7 +47,7 @@ class Config {
                     mediaSync: true,
                     profilePicSync: false,
                     callLogs: true,
-                    readReceipts: true,
+                    readReceipts: false,
                     statusSync: true,
                     biDirectional: true,
                     welcomeMessage: false,
