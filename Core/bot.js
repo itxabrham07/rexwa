@@ -1,15 +1,22 @@
 import baileys from '@whiskeysockets/baileys';
+
 const {
     makeWASocket,
     useMultiFileAuthState,
     DisconnectReason,
-    fetchLatestBaileysVersion,
     makeCacheableSignalKeyStore,
     getAggregateVotesInPollMessage,
     isJidNewsletter,
     delay,
-    proto = baileys?.default?.proto || baileys?.proto
+    proto
 } = baileys;
+
+// Safely access fetchLatestBaileysVersion from either root or default
+const fetchLatestBaileysVersion =
+    baileys.fetchLatestBaileysVersion ||
+    baileys.default?.fetchLatestBaileysVersion ||
+    (async () => ({ version: [2, 3000, 0], isLatest: true }));
+
 
 import qrcode from 'qrcode-terminal';
 import fs from 'fs-extra';
