@@ -1,30 +1,26 @@
-import makeWASocket, {
-    useMultiFileAuthState,
-    DisconnectReason,
-    fetchLatestBaileysVersion,
-    makeCacheableSignalKeyStore,
-    getAggregateVotesInPollMessage,
-    isJidNewsletter,
-    delay,
-    proto
+import makeWASocket, { 
+    useMultiFileAuthState, 
+    DisconnectReason, 
+    fetchLatestBaileysVersion, 
+    makeCacheableSignalKeyStore, 
+    getAggregateVotesInPollMessage, 
+    isJidNewsletter, 
+    delay, 
+    proto 
 } from '@whiskeysockets/baileys';
 import qrcode from 'qrcode-terminal';
-import * as fs from 'fs-extra'; // Use * as fs for CommonJS export with 'fs-extra'
+import fs from 'fs-extra';
 import path from 'path';
 import NodeCache from 'node-cache';
-import { makeInMemoryStore } from './store.js'; // Added .js extension
+import { makeInMemoryStore } from './store.js';
+import config from '../config.js';
+import logger from './logger.js';
+import MessageHandler from './message-handler.js';
+import { connectDb } from '../utils/db.js';
+import ModuleLoader from './module-loader.js';
+import { useMongoAuthState } from '../utils/mongoAuthState.js';
 
-import config from '../config.js'; // Added .js extension
-import logger from './logger.js'; // Added .js extension
-import MessageHandler from './message-handler.js'; // Added .js extension
-import { connectDb } from '../utils/db.js'; // Added .js extension
-import ModuleLoader from './module-loader.js'; // Added .js extension
-import { useMongoAuthState } from '../utils/mongoAuthState.js'; // Added .js extension
-
-
-let TelegramBridge;
-
-export class HyperWaBot {
+class HyperWaBot {
     constructor() {
         this.sock = null;
         this.authPath = './auth_info';
@@ -34,14 +30,13 @@ export class HyperWaBot {
         this.db = null;
         this.moduleLoader = new ModuleLoader(this);
         this.qrCodeSent = false;
-        // Accessing config object properties (assuming config is exported as default)
-        this.useMongoAuth = config.auth.useMongoAuth ?? false;
+        this.useMongoAuth = config.get('auth.useMongoAuth', false);
         
         // Initialize the enhanced store with advanced options
         this.store = makeInMemoryStore({
             logger: logger.child({ module: 'store' }),
-            filePath: config.store.filePath ?? './whatsapp-store.json',
-            autoSaveInterval: config.store.autoSaveInterval ?? 30000
+            filePath: config.get('store.filePath', './whatsapp-store.json'),
+            autoSaveInterval: config.get('store.autoSaveInterval', 30000)
         });
 
         // Load existing store data on startup
@@ -110,17 +105,9 @@ export class HyperWaBot {
             process.exit(1);
         }
 
-        // Conditional import logic (Common in ESM for optional dependencies)
-        if (config.telegram.enabled) {
+        if (config.get('telegram.enabled')) {
             try {
-                // Dynamic import to avoid issues with optional dependencies
-                // Note: The original code used `require('../telegram/bridge')`.
-                // In ESM, this is replaced with a dynamic `import()`.
-                if (!TelegramBridge) {
-                    const module = await import('../telegram/bridge.js');
-                    TelegramBridge = module.default || module.TelegramBridge; // assuming it exports default or a named class
-                }
-                
+                const { default: TelegramBridge } = await import('../telegram/bridge.js');
                 this.telegramBridge = new TelegramBridge(this);
                 await this.telegramBridge.initialize();
                 logger.info('✅ Telegram bridge initialized');
@@ -278,7 +265,7 @@ export class HyperWaBot {
             const messages = this.store.getMessages(chatId);
             for (const msg of messages) {
                 const text = msg.message?.conversation || 
-                             msg.message?.extendedTextMessage?.text || '';
+                           msg.message?.extendedTextMessage?.text || '';
                 if (text.toLowerCase().includes(query.toLowerCase())) {
                     results.push({
                         chatId,
@@ -537,19 +524,13 @@ export class HyperWaBot {
             logger.info('📥 Requested on-demand sync, ID:', messageId);
             return;
         }
-
     }
 
     async onConnectionOpen() {
         logger.info(`✅ Connected to WhatsApp! User: ${this.sock.user?.id || 'Unknown'}`);
 
-        // Accessing config object properties (assuming config is exported as default)
-        if (!config.bot.owner && this.sock.user) {
-            config.bot.owner = this.sock.user.id;
-            // The original code uses config.set, which implies a config class/module. 
-            // In plain object use, you'd just assign, but here we assume config exports an object 
-            // with a setter or is a singleton module that allows modification (like the original).
-            // For now, we'll keep the logic that modifies config.
+        if (!config.get('bot.owner') && this.sock.user) {
+            config.set('bot.owner', this.sock.user.id);
             logger.info(`👑 Owner set to: ${this.sock.user.id}`);
         }
 
@@ -573,27 +554,25 @@ export class HyperWaBot {
     }
 
     async sendStartupMessage() {
-        const owner = config.bot.owner;
+        const owner = config.get('bot.owner');
         if (!owner) return;
 
         const authMethod = this.useMongoAuth ? 'MongoDB' : 'File-based';
         const storeStats = this.getStoreStats();
         
-        const startupMessage = `🚀 *${config.bot.name} v${config.bot.version}* is now online!\n\n` +
-                                     `🔥 *HyperWa Features Active:*\n` +
-                                     `• 📱 Modular Architecture\n` +
-                                     `• 🗄️ Enhanced Data Store: ✅\n` +
-                                     `• 📊 Store Stats: ${storeStats.chats} chats, ${storeStats.contacts} contacts, ${storeStats.messages} messages\n` +
-                                     `• 🔐 Auth Method: ${authMethod}\n` +
-                                     `• 🤖 Telegram Bridge: ${config.telegram.enabled ? '✅' : '❌'}\n` +
-                                     `• 🔧 Custom Modules: ${config.features.customModules ? '✅' : '❌'}\n` +
-                                     `Type *${config.bot.prefix}help* for available commands!`;
+        const startupMessage = `🚀 *${config.get('bot.name')} v${config.get('bot.version')}* is now online!\n\n` +
+                              `🔥 *HyperWa Features Active:*\n` +
+                              `• 📱 Modular Architecture\n` +
+                              `• 🗄️ Enhanced Data Store: ✅\n` +
+                              `• 📊 Store Stats: ${storeStats.chats} chats, ${storeStats.contacts} contacts, ${storeStats.messages} messages\n` +
+                              `• 🔐 Auth Method: ${authMethod}\n` +
+                              `• 🤖 Telegram Bridge: ${config.get('telegram.enabled') ? '✅' : '❌'}\n` +
+                              `• 🔧 Custom Modules: ${config.get('features.customModules') ? '✅' : '❌'}\n` +
+                              `Type *${config.get('bot.prefix')}help* for available commands!`;
 
         try {
             await this.sendMessage(owner, { text: startupMessage });
-        } catch (error) {
-            // Silence send errors during startup message
-        }
+        } catch {}
 
         if (this.telegramBridge) {
             try {
@@ -641,3 +620,6 @@ export class HyperWaBot {
         logger.info('✅ HyperWa Userbot shutdown complete');
     }
 }
+
+export { HyperWaBot };
+export default HyperWaBot;
