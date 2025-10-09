@@ -1,16 +1,15 @@
-import pkg from '@whiskeysockets/baileys';
-
+import baileys from '@whiskeysockets/baileys';
 const {
-    makeWASocket,  
-    useMultiFileAuthState,  
-    DisconnectReason,  
+    makeWASocket,
+    useMultiFileAuthState,
+    DisconnectReason,
     fetchLatestBaileysVersion,
-    makeCacheableSignalKeyStore,  
-    getAggregateVotesInPollMessage,  
-    isJidNewsletter,  
-    delay,  
-    proto
-} = pkg;
+    makeCacheableSignalKeyStore,
+    getAggregateVotesInPollMessage,
+    isJidNewsletter,
+    delay,
+    proto = baileys?.default?.proto || baileys?.proto
+} = baileys;
 
 import qrcode from 'qrcode-terminal';
 import fs from 'fs-extra';
