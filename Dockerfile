@@ -1,5 +1,4 @@
 FROM node:18-alpine
-
 # Install build dependencies for node-canvas, ffmpeg, and other native modules
 RUN apk add --no-cache \
     git \
@@ -16,24 +15,15 @@ RUN apk add --no-cache \
     giflib-dev \
     librsvg-dev \
     ffmpeg
-
 # Set timezone
 ENV TZ=Asia/Karachi
 ENV NODE_ENV=production
-
 # Create app directory
 WORKDIR /app
-
-# Copy package files
+# Install dependencies
 COPY package*.json ./
-
-# Clean install with latest versions
-RUN npm cache clean --force && \
-    rm -rf node_modules package-lock.json && \
-    npm install
-
+RUN npm install
 # Copy source code
 COPY . .
-
 # Start haveged and bot
 CMD ["sh", "-c", "haveged -F & npm start"]
