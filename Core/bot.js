@@ -11,7 +11,7 @@ import makeWASocket, {
 import qrcode from 'qrcode-terminal';
 import fs from 'fs-extra';
 import path from 'path';
-import NodeCache from 'node-cache';
+import NodeCache from '@cacheable/node-cache';
 import { makeInMemoryStore } from './store.js';
 import config from '../config.js';
 import logger from './logger.js';
@@ -43,10 +43,7 @@ class HyperWaBot {
         this.store.loadFromFile();
         
         // Enhanced features from example - SIMPLE VERSION
-        this.msgRetryCounterCache = new NodeCache({
-            stdTTL: 300,
-            maxKeys: 500
-        });
+        this.msgRetryCounterCache = new NodeCache();
         this.onDemandMap = new Map();
         
         // Simple memory cleanup
