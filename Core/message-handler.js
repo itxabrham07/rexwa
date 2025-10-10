@@ -122,15 +122,13 @@ async handleCommand(msg, text) {
     const params = args.slice(1);
 
     // Add presence and typing indicators for commands
-    try {
-        if (config.get('telegram.features.readReceipts')) {
-            await this.bot.sock.readMessages([msg.key]);
-        }
-        await this.bot.sock.presenceSubscribe(sender);
-        await this.bot.sock.sendPresenceUpdate('composing', sender);
-    } catch (error) {
-        // Ignore presence errors
-    }
+try {
+    await this.bot.sock.readMessages([msg.key]);
+    await this.bot.sock.presenceSubscribe(sender);
+    await this.bot.sock.sendPresenceUpdate('composing', sender);
+} catch (error) {
+    // Ignore presence errors
+}
 
 if (!this.checkPermissions(msg, command)) {
     if (config.get('features.sendPermissionError', false)) {
