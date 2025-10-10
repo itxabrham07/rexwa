@@ -726,7 +726,7 @@ async sendStartMessage() {
             await this.sendSimpleMessage(topicId, messageText, sender);
         }
 
-        if (whatsappMsg.key?.id && config.get('telegram.features.readReceipts') !== false) {
+        if (whatsappMsg.key?.id && config.get('telegram.features.readReceipts')) {
             this.queueMessageForReadReceipt(sender, whatsappMsg.key);
         }
     }
